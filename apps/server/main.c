@@ -473,7 +473,7 @@ static void expire_timers(void) {
 }
 
 int main(int argc, char **argv) {
-    int port = 7800; const char *bind_addr = "0.0.0.0", *iduna_url = NULL, *secret_file = NULL, *agent_name = "DEADWEIGHT2-SERVER";
+    int port = 7800; const char *bind_addr = "0.0.0.0", *iduna_url = NULL, *secret_file = NULL, *agent_name = "D2-SERVER";
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) { printf("dw2_server %s\n", DW2_VERSION); return 0; }
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);

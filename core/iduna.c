@@ -5,7 +5,7 @@
 #include "http.h"
 
 #define TMO 3000
-#define GAME "/api/v1/games/deadweight_2"
+#define GAME "/api/v1/games/d2" /* renamed from deadweight_2 -- IDUNA/migrations/truestore/202609251200_rename_deadweight2_to_d2.sql */
 
 static void trim(char *s) {
     size_t n = strlen(s);

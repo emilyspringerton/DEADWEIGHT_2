@@ -129,6 +129,17 @@ itself, no separate matchmaker.
   `deadweight_2.bot.play` / `DEADWEIGHT2-BOTS` agent yet** — deliberately narrow, matching
   `big_o`'s own precedent: minting a bot identity before D4 has a bot to hold it would be
   speculative scope, not this phase's actual job.
+
+  **Renamed, 2026-09-25** (founder real-time: "just call it D2, disambiguate it from DEADWEIGHT,
+  D2 is the official studio name"): every identifier named in this paragraph is historical —
+  accurate to what actually shipped in the commit this section describes, left as-is rather than
+  rewritten (never edit an applied migration; the same discipline applies to not rewriting this
+  doc's own history out from under it). The live, current names are `internal/games.Registry["d2"]`
+  (`d2.play`/`d2.match.write`) and the `D2-SERVER` agent, via a new, additive migration
+  (`202609251200_rename_deadweight2_to_d2.sql`) rather than an edit to the original one — see
+  `core/iduna.h`'s own doc comment and `apps/server/main.c`'s `--agent-name` default for the
+  current, real values. The GitHub repo rename itself (`DEADWEIGHT_2` → `D2`) is separately
+  blocked on token permissions as of this note — see `EMILY/BACKLOG.md` SECTION 546.
 - `tools/dw2_test_client.c` + `scripts/build.sh`'s own new "D2" section — a real, scripted
   headless client (not a stub) that plays a full match over the actual TCP wire protocol.
   Live-verified, not just compiled clean: a real loadout (Generator+Conductor+Railgun+Bulwark,

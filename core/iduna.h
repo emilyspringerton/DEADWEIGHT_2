@@ -1,4 +1,5 @@
-/* IDUNA client for the DEADWEIGHT_2 game contract (game='deadweight_2', internal/games.Registry):
+/* IDUNA client for the D2 game contract (game='d2', internal/games.Registry -- renamed from
+ * deadweight_2, IDUNA/migrations/truestore/202609251200_rename_deadweight2_to_d2.sql):
  * agent login, token verify, match-result reporting, guest register/login. Blocking HTTP with a
  * short timeout -- callers that must not block (dw2_server) run these on a worker thread.
  *

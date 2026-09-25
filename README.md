@@ -23,7 +23,7 @@ split.
 - **`dw2_server`** (D2): a real, server-authoritative TCP match server — queue, get paired
   1v1, pack your grid against a live opponent within a time limit, then fight it out over a
   real-time tick loop the server alone drives (a live `PANIC_CUT` stays legal mid-fight). Optional
-  IDUNA guest-account auth + match-result reporting (`game='deadweight_2'`); runs `--no-auth` for
+  IDUNA guest-account auth + match-result reporting (`game='d2'`); runs `--no-auth` for
   local testing with no IDUNA instance needed.
 - **`dw2_client`** (D2): a real interactive client for `dw2_server` — connects, auto-queues, packs
   a grid against a live opponent (same cursor-based controls as the debug shell) within the
