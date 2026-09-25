@@ -195,7 +195,7 @@ real time skill check" + "make the games swingy and give comeback mechanics and 
 Read as targeting D2 specifically (assumption named, not assumed silently — see the doc below).
 Full design write-up (the round-structure decision and why, the mini-game's real rules, the
 comeback trigger/effect, the bluff mechanism and what's actually hidden, real V0 vs. deferred
-scope) lives in `docs/COMBAT_REDESIGN.md` (golden-doc registered as `DEADWEIGHT2-COMBAT-NORTH`),
+scope) lives in `docs/COMBAT_REDESIGN.md` (golden-doc registered as `DEADWEIGHT2-COMBAT-REDESIGN`),
 not duplicated here. Short version: combat is now itself broken into `DW2_ROUND_TICKS`-tick
 rounds (`core/round.h`); between rounds, a real-time "Surge Timing" skill check plus a hidden
 Overcharge/Brace call (revealed to both sides only after both are locked in) resolves into a
@@ -204,6 +204,29 @@ if the calling ship is behind on hull%, the actual comeback lever. Live-verified
 wire protocol, not just unit-tested: a new `scripts/build.sh` smoke test scripts one side of an
 otherwise-perfectly-symmetric identical-loadout match (which hand-derives to an exact tie at tick
 24) to land one well-timed Overcharge call, turning that tie into a real win at tick 21.
+
+## Cannon programming: a real, compiled LO decision function in the live combat loop — SECTION 549 (real V0, built and live-verified)
+
+Founder real-time, 2026-09-25: "add in LO programming to actual gameplay of DEADWEIGHT add
+stdlibs to LO whatever is needed that is missing" → "like cannon programming or something."
+Read as targeting D2 specifically, same reasoning `docs/LO_CANNON_PROGRAMMING.md` and SECTION 548
+above both apply (assumption named, not assumed silently). Full design write-up (the LO capability
+audit, the real 4-state input/2-state output design, the build pipeline, why the shipped default
+is deliberately the boring "always fire" answer, and what's really deferred) lives in
+`docs/LO_CANNON_PROGRAMMING.md`, not duplicated here. Short version: `dw2_ship_tick`'s weapon-fire
+check (previously an unconditional "fire when charged") now calls a real, compiled LO program
+(`cannon/cannon_decision.llll` → `.prn` → PARENA-generated C, `core/cannon.h`) every tick, packing
+the same `behind` signal SECTION 548 already computes plus whether this shot would be lethal into
+one real, naturally-4-valued state (LO's own real ceiling is mod-4 arithmetic, checked directly
+against `LO/NORTHSTAR.md`, not assumed) — matching the real precedent `LO/NORTHSTAR.md`'s own DUNG
+integration section already established for "a genuinely 4-valued decision fits `SWITCH`/`CASE`
+today." The shipped decision is FIRE in all 4 states (byte-identical to the pre-existing rule,
+verified: every hand-derived smoke-test tick count in this repo is unchanged), with a second, real,
+standalone-tested example program (`cannon_bank_on_safe_lead.llll`) proving the mechanism can
+express real conditional strategy — not wired live, since holding fire has no compensating
+mechanical payoff in this V0 (a real, honestly-discovered failure mode, named in the design doc,
+not glossed over). Real, honest finding: LO's own already-named stdlib gaps (matrices, PCRE
+matching) turned out to be unrelated to this feature — zero new LO stdlib work was needed here.
 
 ## Deferred (not yet built)
 
@@ -220,5 +243,8 @@ D3 "real client shell" line that lived here is now folded into D2 above, not def
   local-practice fallback in real matches" convention) so a 1v1 bot pool can exist at all — this
   is when `deadweight_2.bot.play`/`DEADWEIGHT2-BOTS` actually get minted, not before.
 - [ ] **D5: PARENA mod integration** for combat-decision edge cases, matching every other
-  PARENA-hosted game's "PARENA mod is the trigger, host C does the real work" idiom — not
-  attempted in D1/D2, since both deliberately have zero external dependencies beyond SDL2/libc.
+  PARENA-hosted game's "PARENA mod is the trigger, host C does the real work" idiom. Partially real
+  now, not fully: the cannon-programming section above wires exactly ONE such decision hook
+  (weapon fire, via LO → PARENA) — a real, narrow slice of this idiom, live and tested, not the
+  general "any combat decision can be a mod" framework D5 originally named. Widening that to other
+  decision points (e.g. Panic Cut timing) is real, separate, not attempted this pass.

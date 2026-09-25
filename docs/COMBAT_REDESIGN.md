@@ -209,8 +209,9 @@ Everything above is real, shipped code, not a plan:
 - **SECTION 549's "cannon programming" (LO integration into D2's weapon-fire decision logic)** was
   explicitly held pending this section landing first (BACKLOG's own note: "wiring a new weapon-
   decision hook into code that's about to be restructured would be wasted/conflicting work"). This
-  section's restructuring of `dw2_ship_tick`'s damage path (`dmg_mult`) is now done and stable, so
-  that dependency is clear — SECTION 549 itself is still not started.
+  section's restructuring of `dw2_ship_tick`'s damage path (`dmg_mult`) landed stable first, then
+  SECTION 549 itself landed: a real, compiled LO program now makes the fire/hold call every tick,
+  built and live-verified — see `docs/LO_CANNON_PROGRAMMING.md`.
 - **Round-break interaction with `apps/local/main.c`'s dummy fight or a future real bot (D4)** — a
   bot needs its own decision logic for the Overcharge/Brace/timing choice, which doesn't exist yet
   (D4 itself is still a named, not-yet-built phase in `NORTHSTAR.md`).

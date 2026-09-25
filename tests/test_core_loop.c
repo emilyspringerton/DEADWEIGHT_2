@@ -5,6 +5,7 @@
 #include "../core/combat.h"
 #include "../core/dummy.h"
 #include "../core/round.h"
+#include "../core/cannon.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -347,6 +348,17 @@ static void test_dmg_mult_scales_damage(void) {
     CHECK(target.hull_pct == 100.0f - 2.0f * DW2_WEAPON_DAMAGE);
 }
 
+static void test_cannon_decide_always_fires(void) {
+    /* This binary links the SHIPPED cannon_decision.llll (see scripts/build.sh's own CANNON_SRC
+     * wiring) -- a real, compiled LO program, not a hardcoded C rule -- deliberately FIRE in all 4
+     * states (docs/LO_CANNON_PROGRAMMING.md), so every existing hand-derived hull-timing number in
+     * this file stays byte-identical to before cannon programming existed. */
+    CHECK(dw2_cannon_decide(0, 0) == DW2_CANNON_FIRE);
+    CHECK(dw2_cannon_decide(0, 1) == DW2_CANNON_FIRE);
+    CHECK(dw2_cannon_decide(1, 0) == DW2_CANNON_FIRE);
+    CHECK(dw2_cannon_decide(1, 1) == DW2_CANNON_FIRE);
+}
+
 int main(void) {
     test_placement_legality();
     test_rotation_math();
@@ -365,6 +377,7 @@ int main(void) {
     test_round_no_call_is_neutral();
     test_round_apply_effect();
     test_dmg_mult_scales_damage();
+    test_cannon_decide_always_fires();
     printf("test_core_loop: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

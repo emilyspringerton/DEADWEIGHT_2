@@ -1,4 +1,5 @@
 #include "combat.h"
+#include "cannon.h"
 #include <string.h>
 
 void dw2_ship_init(Dw2Ship *s) {
@@ -215,11 +216,22 @@ void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
     for (int p = 0; p < self->placement_n; p++) {
         if (self->placements[p].item_id < 0) continue;
         if (self->weapon_charge[p] >= DW2_WEAPON_CHARGE_THRESHOLD) {
+            float shot_dmg = DW2_WEAPON_DAMAGE * self->dmg_mult;
+            /* "Cannon programming" (EMILY/BACKLOG.md SECTION 549, docs/LO_CANNON_PROGRAMMING.md):
+             * the fire/hold call is a real, compiled LO program (core/cannon.h), not a hardcoded
+             * "always fire" rule -- packs the same `behind` signal core/round.h's own comeback
+             * grading already uses, plus whether this shot alone would finish the enemy's hull, into
+             * cannon_decision's real 4-state input. The shipped decision program is FIRE in all 4
+             * states, so this is byte-identical to the pre-cannon-programming behavior; a HOLD
+             * leaves weapon_charge untouched, so it's simply re-evaluated fresh next tick. */
+            int self_behind = self->hull_pct < enemy->hull_pct;
+            int shot_is_overkill = enemy->hull_pct <= shot_dmg;
+            if (dw2_cannon_decide(self_behind, shot_is_overkill) == DW2_CANNON_HOLD) continue;
             self->weapon_charge[p] -= DW2_WEAPON_CHARGE_THRESHOLD;
             /* dmg_mult (core/round.h): a graded Overcharge round-break call scales this ship's own
              * outgoing damage for the current round; 1.0 (the default) is byte-identical to pre-
              * round-break behavior. */
-            dw2_ship_apply_damage(enemy, DW2_WEAPON_DAMAGE * self->dmg_mult);
+            dw2_ship_apply_damage(enemy, shot_dmg);
         }
     }
 }

@@ -5,27 +5,32 @@
 # matching DEADWEIGHT's own scripts/build.sh convention.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-CFLAGS_BASE="-std=c99 -Wall -Wextra -Werror -Icore"
+CFLAGS_BASE="-std=c99 -Wall -Wextra -Werror -Icore -DPARENA_NO_GRAPHICS"
+# PARENA_NO_GRAPHICS: core/parena_runtime.h's own documented escape hatch (see docs/
+# LO_CANNON_PROGRAMMING.md) -- D2's cannon decision functions are pure base4 I32 logic with zero
+# graphics surface, so this skips the SDL2/SDL2_ttf include core/combat.c would otherwise pull in
+# via core/cannon.c, keeping dw2_server/test_core_loop genuinely SDL-free.
+CANNON_SRC="core/cannon.c core/parena_runtime.c cannon/cannon_decision_gen.c"
 rm -rf build && mkdir -p build
 
 echo "== C: core-loop tests (ASan+UBSan) =="
 gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
-    tests/test_core_loop.c core/items.c core/combat.c core/dummy.c core/round.c -o build/test_core_loop
+    tests/test_core_loop.c core/items.c core/combat.c core/dummy.c core/round.c $CANNON_SRC -o build/test_core_loop
 ./build/test_core_loop
 
 echo "== GUI: local debug shell (SDL2) + headless selftest =="
 command -v pkg-config >/dev/null && pkg-config --exists sdl2 || { echo "needs libsdl2-dev (pkg-config sdl2)"; exit 1; }
 gcc $CFLAGS_BASE -O2 $(pkg-config --cflags sdl2) \
-    apps/local/main.c core/items.c core/combat.c core/dummy.c $(pkg-config --libs sdl2) \
+    apps/local/main.c core/items.c core/combat.c core/dummy.c $CANNON_SRC $(pkg-config --libs sdl2) \
     -o build/dw2_local
 ./build/dw2_local --selftest
 
 echo "== D2: dw2_server + headless wire-protocol smoke test (ASan+UBSan) =="
 gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iapps/server \
-    core/items.c core/combat.c core/round.c core/protocol.c core/http.c core/iduna.c apps/server/main.c \
+    core/items.c core/combat.c core/round.c core/protocol.c core/http.c core/iduna.c apps/server/main.c $CANNON_SRC \
     -o build/dw2_server -lpthread -lm
 gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
-    core/protocol.c core/round.c core/combat.c core/items.c tools/dw2_test_client.c -o build/dw2_test_client
+    core/protocol.c core/round.c core/combat.c core/items.c tools/dw2_test_client.c $CANNON_SRC -o build/dw2_test_client
 
 DW2_TEST_PORT=17800
 ./build/dw2_server --port "$DW2_TEST_PORT" --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
@@ -94,7 +99,7 @@ echo "round-break smoke test: A's single well-timed Overcharge call turned an id
 
 echo "== D2: dw2_client (real interactive client) + headless wire-protocol smoke test (ASan+UBSan) =="
 gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all $(pkg-config --cflags sdl2) \
-    core/items.c core/combat.c core/round.c core/protocol.c core/http.c core/iduna.c apps/client/main.c \
+    core/items.c core/combat.c core/round.c core/protocol.c core/http.c core/iduna.c apps/client/main.c $CANNON_SRC \
     $(pkg-config --libs sdl2) -o build/dw2_client
 
 DW2_TEST_PORT2=17801
@@ -122,5 +127,25 @@ kill "$DW2_SRV2_PID" 2>/dev/null || true; trap - EXIT
 grep -q "^MATCH_END result=1 reason=0" build/dw2_client_a.log || { echo "D2 client smoke test FAILED: expected dw2_client A (real loadout) to win on hull, see build/dw2_client_a.log"; cat build/dw2_client_a.log; exit 1; }
 grep -q "^MATCH_END result=0 reason=0" build/dw2_client_b.log || { echo "D2 client smoke test FAILED: expected dw2_client B (empty grid) to lose on hull, see build/dw2_client_b.log"; cat build/dw2_client_b.log; exit 1; }
 echo "dw2_client smoke test: a real interactive-client-shaped binary completed a full match over the actual wire protocol"
+
+echo "== D2: cannon programming -- HOLD branch, live dw2_ship_tick integration (ASan+UBSan) =="
+# Standalone from test_core_loop: only one compiled LO decision program can be linked into a given
+# binary at a time (both cannon/*_gen.c files define the real `lo_program` symbol) -- this binary
+# links cannon_bank_on_safe_lead_gen.c specifically to exercise DW2_CANNON_HOLD for real, live,
+# through the actual dw2_ship_tick call path (not the shipped, always-fire default). See
+# tests/test_cannon_hold.c and docs/LO_CANNON_PROGRAMMING.md.
+gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+    tests/test_cannon_hold.c core/items.c core/combat.c core/cannon.c core/parena_runtime.c \
+    cannon/cannon_bank_on_safe_lead_gen.c -o build/test_cannon_hold
+./build/test_cannon_hold
+
+echo "== D2: cannon programming -- a second, real LO decision program (ASan+UBSan) =="
+# Proves the LO->.prn->PARENA->C pipeline isn't a one-off: cannon_bank_on_safe_lead.llll is a
+# genuinely different compiled program from the live cannon_decision.llll (docs/
+# LO_CANNON_PROGRAMMING.md), not wired into any real match -- see tools/dw2_cannon_demo.c.
+gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+    tools/dw2_cannon_demo.c core/parena_runtime.c cannon/cannon_bank_on_safe_lead_gen.c \
+    -o build/dw2_cannon_demo
+./build/dw2_cannon_demo
 
 echo "BUILD CLEAN"
