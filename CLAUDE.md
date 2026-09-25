@@ -5,8 +5,9 @@
 The backpack battler ("Dark Sector: Hold Battles" VS1 mechanic) from the sibling `DEADWEIGHT`
 repo, spun out into its own repo — see `NORTHSTAR.md` for the full why and the real design
 provenance (`DEADWEIGHT/NORTHSTAR.md` / `docs/SPEC_REVIEW.md` / `docs/PHASE_D1_CORE_LOOP.md`).
-Phase D1 (local-only core loop, no networking/accounts) is built and live-verified; everything
-past that is a named, not-yet-built phase in `NORTHSTAR.md`.
+Phase D1 (local-only core loop) and D2 (server-authoritative 1v1, `dw2_server`) are built and
+live-verified; D3-D5 (a real client, a bot, PARENA integration) are named, not-yet-built phases
+in `NORTHSTAR.md`.
 
 **Licensing: do not add the Unlicense to this repo.** Explicit founder instruction (2026-09-25),
 unlike `SKULDMARK`/`SPIDERBEETLE`'s own convention — licensing is deliberately left unresolved
@@ -14,15 +15,16 @@ here. Do not add any `LICENSE` file without a fresh, explicit ask.
 
 ## Stack
 
-Hand-written C99, no external dependencies for the core loop; SDL2 only for the debug shell
-(`apps/local/`). No PARENA, no networking, no IDUNA integration yet — all real, named future
-phases in `NORTHSTAR.md`, not overlooked.
+Hand-written C99, no external dependencies for the core loop or `dw2_server`; SDL2 only for the
+debug shell (`apps/local/`). No PARENA yet — a real, named future phase (D5) in `NORTHSTAR.md`.
 
 ```bash
-./scripts/build.sh          # ASan+UBSan core-loop tests, then the SDL debug shell + its selftest
-./build/dw2_local           # play it (needs a display)
+./scripts/build.sh           # ASan+UBSan: core-loop tests, SDL debug shell + selftest, dw2_server + a real wire-protocol smoke match
+./build/dw2_local             # play it locally (needs a display)
 ./build/dw2_local --selftest  # headless: scripted match through the real render path, no display needed
-./build/test_core_loop      # just the headless test suite
+./build/test_core_loop        # just the headless core-loop test suite
+./build/dw2_server --port 7800 --no-auth --fast-forward   # run a local server, no IDUNA needed
+./build/dw2_test_client --port 7800 --name X --place 0,0,0,0 ...   # scripted headless test client (not a real client -- D3's job)
 ```
 
 ## Layout
@@ -31,7 +33,16 @@ phases in `NORTHSTAR.md`, not overlooked.
 - `core/items.{h,c}` — the V0 item catalog + authored fragment tables.
 - `core/combat.{h,c}` — energy routing, Back-EMF, Panic Cut, win condition.
 - `core/dummy.{h,c}` — the fixed hand-authored dummy opponent (not a bot; see `NORTHSTAR.md`).
+- `core/protocol.{h,c}` — the D2 wire protocol codec (`docs`-equivalent lives in `NORTHSTAR.md`'s
+  own D2 section, not a separate file yet — revisit if the protocol grows past what one doc
+  section can hold, matching DEADWEIGHT's own `docs/WIRE_PROTOCOL.md` if it does).
+- `core/net.h`/`http.{h,c}`/`iduna.{h,c}` — TCP/HTTP/IDUNA-client infra, ported from DEADWEIGHT's
+  own (`dw2_`-prefixed, trimmed to what this game actually calls).
 - `apps/local/main.c` — the SDL2 debug shell (pack + fight, immediate-mode boxes only).
+- `apps/server/main.c` — `dw2_server`, the D2 authoritative match server (TCP, `poll()`, embedded
+  FIFO queue — no separate matchmaker binary; see `NORTHSTAR.md`'s D2 section for why).
+- `tools/dw2_test_client.c` — scripted headless test client for exercising `dw2_server` over the
+  real wire protocol; not a real client (D3's job).
 - `tests/test_core_loop.c` — headless ASan+UBSan test suite, the actual "done" bar for D1.
 
 ## Founder Real-Time Direction

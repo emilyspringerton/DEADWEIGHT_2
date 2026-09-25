@@ -1,0 +1,21 @@
+name: DEADWEIGHT_2 CI
+
+on:
+  push:
+  pull_request:
+
+# Real, current scope only: build + run scripts/build.sh's own ASan/UBSan test suite (core loop,
+# the SDL2 debug shell's headless --selftest, and D2's dw2_server + a full wire-protocol smoke
+# match). No auto-release/versioning yet -- unlike DEADWEIGHT's own ci.yml, this repo has never
+# shipped a binary release; that's real, separate, not-yet-decided scope (D3, a real client, is
+# the natural point to revisit it), not an oversight.
+jobs:
+  build:
+    name: Build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Build + test
+        run: ./scripts/build.sh

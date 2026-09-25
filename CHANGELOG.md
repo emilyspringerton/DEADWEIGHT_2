@@ -1,4 +1,5 @@
 ## 2026-09-25
 
 - Phase D1 core loop: 6x6 spatial-knapsack-into-combat mechanic (grid/items/energy-routing/Back-EMF/Panic Cut), headless ASan+UBSan test suite (53 checks), and a local SDL2 debug shell with a headless --selftest. Backpack battler VS1 mechanic from DEADWEIGHT/NORTHSTAR.md, spun into its own repo. (sess-20260923-1030-4a526255)
+- Phase D2: dw2_server, a real server-authoritative TCP match server (poll() loop, embedded FIFO queue -- no separate matchmaker binary, a real correction to NORTHSTAR.md's original plan). New core/protocol.{h,c} wire codec for a packing-phase-then-real-time-tick-combat lifecycle; ported core/net.h/http.{h,c}/iduna.{h,c} infra from DEADWEIGHT. IDUNA: internal/games.Registry["deadweight_2"], a new DEADWEIGHT2-SERVER M2M agent, migration 202609250900_deadweight2_agents_and_permissions.sql. New tools/dw2_test_client.c + a scripts/build.sh smoke test: a real loadout beats an empty grid in a real match over the actual wire protocol, verified alongside placement/cut rejection, pack-deadline auto-start, and forfeit-on-disconnect. New .github/workflows/ci.yml. (sess-20260923-1030-4a526255)
 

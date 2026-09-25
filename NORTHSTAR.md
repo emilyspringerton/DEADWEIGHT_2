@@ -93,24 +93,74 @@ changes live routing, and the fuzz pass runs clean under ASan+UBSan.
   value is meta/tiebreak-only (never a primary win condition), so this was left as the simplest
   reading rather than guessed at further.
 
-## Deferred (not this repo's V0, matching `DEADWEIGHT/NORTHSTAR.md`'s own cut)
+## D2: server-authoritative 1v1 — done, live-verified (EMILY/BACKLOG.md SECTION 546)
+
+Built for real, not just scoped, with one real correction to this doc's own original plan found
+during implementation: **there is no reusable matchmaker binary.** `DEADWEIGHT/apps/matchmaker`
+doesn't exist — DEADWEIGHT's own `dw_server` does its own in-process FIFO queueing, never split
+into a separate binary. The one real "generic, already-parameterized matchmaker" in the monorepo
+(`ECOWAR`/`REDGARDEN`'s `apps/matchmaker`) speaks a UDP wire protocol and forks a new server
+process per match — incompatible with DW2's TCP, single-process, real-time-tick design. So
+`dw2_server` follows DEADWEIGHT's own actual precedent instead: it queues and pairs connections
+itself, no separate matchmaker.
+
+**What's real:**
+- `core/protocol.h`/`.c` — a new v1 wire codec (little-endian, `u16 len + u8 type + payload`,
+  same framing convention as DEADWEIGHT's own `docs/WIRE_PROTOCOL.md`) for a genuinely different
+  match lifecycle than DW's round-lock model: `HELLO`/`AUTH` → `QUEUE` → `MATCH_FOUND` (a timed
+  packing phase: `PLACE`/`PANIC_CUT`/`READY`) → `COMBAT_START` → one `TICK` broadcast per
+  `--tick-ms` (server-clock-driven `dw2_ship_tick`, not a per-tick player lock — `PANIC_CUT`
+  stays legal live mid-combat, per `core/combat.h`'s own doc comment) → `MATCH_END`.
+- `apps/server/main.c` (`dw2_server`) — single `poll()` loop, non-blocking TCP, the same
+  IDUNA-worker-thread pattern as `dw_server` (verify/report never block the loop). FIFO
+  human/bot pairing (bots wait for D4). A match auto-force-starts combat at `--pack-ms` if either
+  side hasn't sent `READY` (auto-locking whatever's placed, including an empty grid) — combat
+  never hangs on a player who never readies up. Disconnect mid-packing or mid-combat is a real
+  forfeit (opponent wins), not a silent hang.
+- `core/net.h`/`http.h`/`.c`/`iduna.h`/`.c` — ported from DEADWEIGHT's own infra, `dw2_`-prefixed,
+  trimmed to D2's real needs (agent login/verify/report, guest register/login — no friends/duels/
+  steam/draft-run/redeem, since this game has none of those systems).
+- IDUNA: `internal/games.Registry["deadweight_2"]` (`deadweight_2.play` +
+  `deadweight_2.match.write`), migration `202609250900_deadweight2_agents_and_permissions.sql`,
+  and a new `DEADWEIGHT2-SERVER` M2M agent (`config/agents.json`) — its own identity, never
+  reusing DEADWEIGHT's or ECOWAR's (`ECOWAR-BOTS`'s own precedent). No `game_guest_credentials`/
+  `game_player_stats`/`game_matches` migration needed — those tables are already generic
+  (`game` column), confirmed live via `internal/games.Registry`'s own doc comment. **No
+  `deadweight_2.bot.play` / `DEADWEIGHT2-BOTS` agent yet** — deliberately narrow, matching
+  `big_o`'s own precedent: minting a bot identity before D4 has a bot to hold it would be
+  speculative scope, not this phase's actual job.
+- `tools/dw2_test_client.c` + `scripts/build.sh`'s own new "D2" section — a real, scripted
+  headless client (not a stub) that plays a full match over the actual TCP wire protocol.
+  Live-verified, not just compiled clean: a real loadout (Generator+Conductor+Railgun+Bulwark,
+  the same one `apps/local`'s own `--selftest` fights) beats an empty grid in exactly 21 ticks
+  (hand-derivable: 10 energy/tick against a 30 charge threshold fires every 3rd tick × 15 dmg,
+  20 armor absorbs the first hit), `MATCH_END` symmetric on both sockets (winner=1/loser=0, same
+  reason/ticks). Also verified directly against the raw wire bytes (not just the C client): an
+  illegal overlapping placement rejects clean, a `PANIC_CUT` on an unsplittable item (Railgun)
+  rejects clean, a match where neither side ever sends `READY` still force-starts combat at the
+  pack deadline, and a mid-packing disconnect resolves as a real forfeit for the survivor.
+
+**Real, named simplifications (not oversights):** no rating/Elo update wired into the
+`match-result` report body yet (IDUNA's own `game_matches`/`game_player_stats` tables already
+compute this generically from `winner`, same as DEADWEIGHT — nothing D2-specific to add here);
+guest-only auth path exercised (`--no-auth` mode) — a live IDUNA integration test (real JWT
+through `dwi2_verify`) wasn't run in this sandbox, since it needs a running IDUNA instance with
+the new migration applied; that's real, deployment-time verification, not a code gap.
+
+## Deferred (not yet built)
 
 Everything `DEADWEIGHT/NORTHSTAR.md` already deferred still applies here: the options-pricing/
 insurance/derivatives layer, Merkle-tree cargo-hiding, 2v2/Link Modules, the mobile haptic timing
 table, the full 24-item/16-Ultimate catalog, and the tournament bracket. Additionally, this
-repo's own phased plan (mirroring `DEADWEIGHT/docs/PHASE_D2..D6`, adapted):
+repo's own remaining phased plan (mirroring `DEADWEIGHT/docs/PHASE_D2..D6`, adapted):
 
-- [ ] **D2: server-authoritative 1v1.** A new hand-written C `dw2_server` (same architecture as
-  DEADWEIGHT's `apps/server`) + a matchmaker reusing `apps/matchmaker`'s own generic, already-
-  parameterized binary. IDUNA: new `game='deadweight_2'` scope, its own M2M agent identity (never
-  reusing DEADWEIGHT's or ECOWAR's — `ECOWAR-BOTS`'s own precedent), guest-account auth (the
-  `provider="guest"` work DEADWEIGHT's own NORTHSTAR already scoped in detail, reused here rather
-  than re-designed).
 - [ ] **D3: a real client shell** replacing the debug renderer — drag/drop-or-cursor packing UX,
   real art, EOSUI Option C once it exists (`EMILY/docs/EOSUI_NORTHSTAR.md`) for the shop/HUD
-  chrome.
+  chrome, speaking `core/protocol.h`'s real wire protocol instead of `tools/dw2_test_client.c`'s
+  scripted test harness.
 - [ ] **D4: a real placeholder bot** (heuristic first, matching `arena_bot_enabled`'s own "no
-  local-practice fallback in real matches" convention) so a 1v1 bot pool can exist at all.
+  local-practice fallback in real matches" convention) so a 1v1 bot pool can exist at all — this
+  is when `deadweight_2.bot.play`/`DEADWEIGHT2-BOTS` actually get minted, not before.
 - [ ] **D5: PARENA mod integration** for combat-decision edge cases, matching every other
   PARENA-hosted game's "PARENA mod is the trigger, host C does the real work" idiom — not
-  attempted in D1, since D1 deliberately has zero external dependencies beyond SDL2.
+  attempted in D1/D2, since both deliberately have zero external dependencies beyond SDL2/libc.
