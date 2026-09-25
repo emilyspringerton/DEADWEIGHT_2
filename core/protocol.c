@@ -60,6 +60,15 @@ int dw2_encode(const Dw2WireMsg *m, uint8_t *buf, size_t cap) {
         w8(&w, m->u.tick.shatter_you); w8(&w, m->u.tick.shatter_opp);
         break;
     case DW2_S_MATCH_END: w32(&w, m->u.match_end.match_id); w8(&w, m->u.match_end.result); w8(&w, m->u.match_end.reason); w8(&w, m->u.match_end.ticks); break;
+    case DW2_S_ROUND_BREAK:
+        w8(&w, m->u.round_break.round_no); w8(&w, m->u.round_break.behind);
+        w16(&w, m->u.round_break.target_ms); w16(&w, m->u.round_break.budget_ms);
+        break;
+    case DW2_C_ROUND_CALL: w8(&w, m->u.round_call.call); break;
+    case DW2_S_ROUND_RESULT:
+        w8(&w, m->u.round_result.your_call); w8(&w, m->u.round_result.your_grade); w8(&w, m->u.round_result.your_effect);
+        w8(&w, m->u.round_result.opp_call); w8(&w, m->u.round_result.opp_grade); w8(&w, m->u.round_result.opp_effect);
+        break;
     case DW2_S_ERROR: w8(&w, m->u.error.code); break;
     default: return -1;
     }
@@ -79,6 +88,7 @@ static int payload_size(uint8_t t) {
     case DW2_S_MATCH_FOUND: return 28; case DW2_S_PLACE_ACK: return 1; case DW2_S_PLACE_REJECT: return 1;
     case DW2_S_CUT_ACK: return 1; case DW2_S_CUT_REJECT: return 1;
     case DW2_S_COMBAT_START: return 10; case DW2_S_TICK: return 9; case DW2_S_MATCH_END: return 7;
+    case DW2_S_ROUND_BREAK: return 6; case DW2_C_ROUND_CALL: return 1; case DW2_S_ROUND_RESULT: return 6;
     case DW2_S_ERROR: return 1; default: return -1;
     }
 }
@@ -139,6 +149,15 @@ int dw2_decode(const uint8_t *buf, size_t len, Dw2WireMsg *out, size_t *consumed
         out->u.tick.shatter_you = (uint8_t)r8(&r); out->u.tick.shatter_opp = (uint8_t)r8(&r);
         break;
     case DW2_S_MATCH_END: out->u.match_end.match_id = r32(&r); out->u.match_end.result = (uint8_t)r8(&r); out->u.match_end.reason = (uint8_t)r8(&r); out->u.match_end.ticks = (uint8_t)r8(&r); break;
+    case DW2_S_ROUND_BREAK:
+        out->u.round_break.round_no = (uint8_t)r8(&r); out->u.round_break.behind = (uint8_t)r8(&r);
+        out->u.round_break.target_ms = (uint16_t)r16(&r); out->u.round_break.budget_ms = (uint16_t)r16(&r);
+        break;
+    case DW2_C_ROUND_CALL: out->u.round_call.call = (uint8_t)r8(&r); break;
+    case DW2_S_ROUND_RESULT:
+        out->u.round_result.your_call = (uint8_t)r8(&r); out->u.round_result.your_grade = (uint8_t)r8(&r); out->u.round_result.your_effect = (uint8_t)r8(&r);
+        out->u.round_result.opp_call = (uint8_t)r8(&r); out->u.round_result.opp_grade = (uint8_t)r8(&r); out->u.round_result.opp_effect = (uint8_t)r8(&r);
+        break;
     case DW2_S_ERROR: out->u.error.code = (uint8_t)r8(&r); break;
     default: return -1;
     }

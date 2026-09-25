@@ -43,6 +43,7 @@
 #include "../../core/combat.h"
 #include "../../core/items.h"
 #include "../../core/iduna.h"
+#include "../../core/round.h"
 
 #define CELL_PX 64
 #define GRID_ORIGIN_X 40
@@ -173,6 +174,13 @@ static float hull_you = 100, hull_opp = 100, armor_you = 0, armor_opp = 0;
 static uint16_t waiting_count = 0;
 static uint32_t match_ticks = 0; static uint8_t match_result = 0, match_reason = 0;
 
+/* Round-break mini-game (EMILY/BACKLOG.md SECTION 548, core/round.h). round_break_active gates the
+ * O/B keys during CS_COMBAT. --selftest deliberately never presses either (same "stay silent,
+ * graded DW2_GRADE_NONE, fully neutral effect" default tools/dw2_test_client.c now uses), so the
+ * existing hand-derived --selftest smoke test result is unaffected by round-breaks now happening
+ * mid-match -- this client's real-time-skill-check support is for a live human player. */
+static int round_break_active = 0;
+
 static int selftest_mode = 0, selftest_empty = 0;
 
 static void try_place(int item, int row, int col, int rot) {
@@ -250,6 +258,19 @@ static void handle_server_msg(const Dw2WireMsg *m) {
         printf("MATCH_END result=%u reason=%u ticks=%u\n", match_result, match_reason, match_ticks);
         state = CS_DONE;
         break;
+    case DW2_S_ROUND_BREAK:
+        round_break_active = 1;
+        printf("ROUND_BREAK round=%u%s -- press O (Overcharge) or B (Brace), aim for ~%ums (budget %ums)\n",
+               m->u.round_break.round_no, m->u.round_break.behind ? " [you are BEHIND -- a hit pays off more]" : "",
+               m->u.round_break.target_ms, m->u.round_break.budget_ms);
+        break;
+    case DW2_S_ROUND_RESULT:
+        round_break_active = 0;
+        printf("ROUND_RESULT you: call=%u grade=%u effect=%u | opp: call=%u grade=%u effect=%u "
+               "(call 0=Overcharge 1=Brace 2=none; grade 0=none 1=miss 2=good 3=perfect)\n",
+               m->u.round_result.your_call, m->u.round_result.your_grade, m->u.round_result.your_effect,
+               m->u.round_result.opp_call, m->u.round_result.opp_grade, m->u.round_result.opp_effect);
+        break;
     case DW2_S_ERROR:
         printf("ERROR code=%u\n", m->u.error.code);
         if (state == CS_CONNECTING || state == CS_QUEUED) state = CS_ERROR;
@@ -290,6 +311,13 @@ static void handle_key(SDL_Keycode k) {
         else if (k == SDLK_f) send_ready();
     } else if (state == CS_COMBAT) {
         if (k >= SDLK_0 && k <= SDLK_9) try_cut((int)(k - SDLK_0));
+        else if (round_break_active && (k == SDLK_o || k == SDLK_b)) {
+            round_break_active = 0; /* one call per break -- server would reject a second anyway */
+            Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_C_ROUND_CALL;
+            m.u.round_call.call = (k == SDLK_o) ? DW2_CALL_OVERCHARGE : DW2_CALL_BRACE;
+            send_msg(&m);
+            printf("ROUND_CALL sent: %s\n", k == SDLK_o ? "overcharge" : "brace");
+        }
     }
 }
 

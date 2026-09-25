@@ -20,6 +20,7 @@
 #include "../../core/combat.h"
 #include "../../core/iduna.h"
 #include "../../core/protocol.h"
+#include "../../core/round.h"
 #include "version.h"
 #ifndef _WIN32
 #include <pthread.h>
@@ -48,6 +49,13 @@ typedef struct {
     int active; uint32_t id, seed; int conn[2];
     Dw2Ship ship[2]; int ready[2]; uint64_t pack_deadline;
     int combat_started; int elapsed_ticks; uint64_t next_tick_deadline;
+    /* Round-break mini-game (EMILY/BACKLOG.md SECTION 548, core/round.h). round_break: 1 while
+     * ticking is paused between rounds. round_no: 1-indexed, which break this is. round_call[s]:
+     * -1 = no call yet this break, else DW2_CALL_OVERCHARGE/BRACE; round_call_ms[s] is the real
+     * server-clock receipt time used to grade the timing skill check (server-authoritative, never
+     * trusts a client-reported timestamp). */
+    int round_break; int round_no; uint64_t round_break_ms, round_deadline_ms;
+    int round_call[2]; uint64_t round_call_ms[2];
 } Match;
 
 static Conn conns[MAX_CONNS];
@@ -203,6 +211,72 @@ static void send_tick(Match *mt) {
     }
 }
 
+/* Encodes an applied Dw2RoundEffect into ROUND_RESULT's fixed-point `effect` byte -- meaning
+ * depends on `call`, per core/protocol.h's own doc comment on round_result. */
+static uint8_t encode_round_effect(int call, Dw2RoundEffect e) {
+    if (call == DW2_CALL_OVERCHARGE) {
+        if (e.self_damage > 0.0f) { float v = e.self_damage; if (v > 255.0f) v = 255.0f; return (uint8_t)v; }
+        float v = e.dmg_mult * 50.0f; if (v > 255.0f) v = 255.0f; if (v < 0.0f) v = 0.0f; return (uint8_t)v;
+    }
+    if (call == DW2_CALL_BRACE) { float v = e.armor_bonus; if (v > 255.0f) v = 255.0f; if (v < 0.0f) v = 0.0f; return (uint8_t)v; }
+    return 0;
+}
+
+/* Opens a round-break: pauses ticking, tells both sides the real-time skill-check target and
+ * whether THEY are currently behind (core/round.h's comeback trigger), and starts the real
+ * wall-clock input budget. Ends when both sides have called (handle_round_call, immediate) or
+ * round_deadline_ms passes (expire_timers, a no-call graded DW2_GRADE_NONE with a neutral effect
+ * -- see resolve_round_break). */
+static void begin_round_break(int mi) {
+    Match *mt = &matches[mi];
+    mt->round_no++;
+    mt->round_break = 1;
+    mt->round_break_ms = dw2_now_ms();
+    mt->round_deadline_ms = mt->round_break_ms + DW2_ROUND_BUDGET_MS;
+    mt->round_call[0] = mt->round_call[1] = -1;
+    for (int s = 0; s < 2; s++) {
+        const Dw2Ship *you = &mt->ship[s], *opp = &mt->ship[1 - s];
+        Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_ROUND_BREAK;
+        m.u.round_break.round_no = (uint8_t)mt->round_no;
+        m.u.round_break.behind = (uint8_t)(you->hull_pct < opp->hull_pct);
+        m.u.round_break.target_ms = dw2_round_target_ms(mt->seed, mt->round_no);
+        m.u.round_break.budget_ms = DW2_ROUND_BUDGET_MS;
+        send_msg(mt->conn[s], &m);
+    }
+    vlog("match %u: round %d break (hull %.1f/%.1f)", mt->id, mt->round_no, mt->ship[0].hull_pct, mt->ship[1].hull_pct);
+}
+
+/* Grades both sides (a missing call is graded DW2_GRADE_NONE with a neutral effect -- see
+ * core/round.h's own doc comment: no punishment or reward for a mini-game never engaged with),
+ * applies the effects, reveals both calls+grades+effects to both sides (the bluff payoff: you only
+ * learn what your opponent actually did after it's already locked in), then resumes ticking. */
+static void resolve_round_break(int mi) {
+    Match *mt = &matches[mi];
+    float hull0 = mt->ship[0].hull_pct, hull1 = mt->ship[1].hull_pct;
+    int behind[2] = { hull0 < hull1, hull1 < hull0 };
+    int grade[2]; Dw2RoundEffect eff[2]; int call[2];
+    for (int s = 0; s < 2; s++) {
+        int no_call = (mt->round_call[s] < 0);
+        call[s] = no_call ? DW2_CALL_NONE : mt->round_call[s];
+        uint32_t elapsed = no_call ? 0 : (uint32_t)(mt->round_call_ms[s] - mt->round_break_ms);
+        eff[s] = dw2_round_grade(mt->seed, mt->round_no, call[s], no_call, elapsed, behind[s], &grade[s]);
+    }
+    for (int s = 0; s < 2; s++) dw2_ship_apply_round_effect(&mt->ship[s], eff[s]);
+    for (int s = 0; s < 2; s++) {
+        int o = 1 - s;
+        Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_ROUND_RESULT;
+        m.u.round_result.your_call = (uint8_t)call[s]; m.u.round_result.your_grade = (uint8_t)grade[s];
+        m.u.round_result.your_effect = encode_round_effect(call[s], eff[s]);
+        m.u.round_result.opp_call = (uint8_t)call[o]; m.u.round_result.opp_grade = (uint8_t)grade[o];
+        m.u.round_result.opp_effect = encode_round_effect(call[o], eff[o]);
+        send_msg(mt->conn[s], &m);
+    }
+    vlog("match %u: round %d result grades=[%d,%d] calls=[%d,%d] hull now %.1f/%.1f", mt->id, mt->round_no,
+         grade[0], grade[1], call[0], call[1], mt->ship[0].hull_pct, mt->ship[1].hull_pct);
+    mt->round_break = 0;
+    mt->next_tick_deadline = opt_fast_forward ? dw2_now_ms() : dw2_now_ms() + (uint64_t)opt_tick_ms;
+}
+
 static void run_tick(int mi) {
     Match *mt = &matches[mi];
     dw2_ship_tick(&mt->ship[0], &mt->ship[1]);
@@ -213,6 +287,13 @@ static void run_tick(int mi) {
     if (r != DW2_RESULT_ONGOING) {
         int reason = (mt->ship[0].hull_pct <= 0.0f || mt->ship[1].hull_pct <= 0.0f) ? DW2_END_HULL : DW2_END_TIMEOUT;
         end_match(mi, reason);
+        return;
+    }
+    /* Round structure (EMILY/BACKLOG.md SECTION 548, core/round.h): a fixed DW2_ROUND_TICKS-tick
+     * burst ends in a round-break, unless the match timeout is already reached -- no point opening
+     * a mini-game combat is about to end regardless of its outcome. */
+    if (mt->elapsed_ticks % DW2_ROUND_TICKS == 0 && mt->elapsed_ticks < DW2_MATCH_TIMEOUT_TICKS) {
+        begin_round_break(mi);
         return;
     }
     mt->next_tick_deadline = opt_fast_forward ? dw2_now_ms() : dw2_now_ms() + (uint64_t)opt_tick_ms;
@@ -245,6 +326,7 @@ static int start_match(int a, int b) {
     if (mi < 0) return 0;
     Match *mt = &matches[mi]; memset(mt, 0, sizeof *mt);
     mt->active = 1; mt->id = next_match++; mt->seed = next_seed(); mt->conn[0] = a; mt->conn[1] = b;
+    mt->round_call[0] = mt->round_call[1] = -1; /* 0 is a valid DW2_CALL_OVERCHARGE, not "unset" */
     dw2_ship_init(&mt->ship[0]); dw2_ship_init(&mt->ship[1]);
     mt->pack_deadline = dw2_now_ms() + (uint64_t)opt_pack_ms;
     for (int s = 0; s < 2; s++) {
@@ -387,6 +469,24 @@ static void handle_cut(int ci, const Dw2WireMsg *m) {
     r.type = DW2_S_CUT_ACK; r.u.cut_ack.placement_idx = m->u.cut.placement_idx; send_msg(ci, &r);
 }
 
+/* DW2_C_ROUND_CALL: legal only while c->state == S_COMBAT AND the match is actually mid-round-
+ * break; a second call from the same seat this break is silently ignored (first call wins, no
+ * take-backs). Resolves the break immediately once both seats have called, rather than waiting out
+ * the rest of the budget. */
+static void handle_round_call(int ci, const Dw2WireMsg *m) {
+    Conn *c = &conns[ci];
+    if (c->state != S_COMBAT || c->match < 0 || !matches[c->match].active) { send_error(ci, DW2_ERR_BAD_STATE); return; }
+    Match *mt = &matches[c->match];
+    if (!mt->round_break || (m->u.round_call.call != DW2_CALL_OVERCHARGE && m->u.round_call.call != DW2_CALL_BRACE)) {
+        send_error(ci, DW2_ERR_BAD_STATE); return;
+    }
+    if (mt->round_call[c->seat] < 0) {
+        mt->round_call[c->seat] = m->u.round_call.call;
+        mt->round_call_ms[c->seat] = dw2_now_ms();
+    }
+    if (mt->round_call[0] >= 0 && mt->round_call[1] >= 0) resolve_round_break(c->match);
+}
+
 static void handle_msg(int ci, const Dw2WireMsg *m) {
     Conn *c = &conns[ci];
     Dw2WireMsg r; memset(&r, 0, sizeof r);
@@ -413,6 +513,7 @@ static void handle_msg(int ci, const Dw2WireMsg *m) {
         return;
     case DW2_C_PLACE: handle_place(ci, m); return;
     case DW2_C_PANIC_CUT: handle_cut(ci, m); return;
+    case DW2_C_ROUND_CALL: handle_round_call(ci, m); return;
     case DW2_C_READY:
         if (c->state != S_PACKING) { send_error(ci, DW2_ERR_BAD_STATE); return; }
         matches[c->match].ready[c->seat] = 1;
@@ -468,6 +569,7 @@ static void expire_timers(void) {
         Match *mt = &matches[i];
         if (!mt->active) continue;
         if (!mt->combat_started) { start_combat_if_ready(i); continue; }
+        if (mt->round_break) { if (now >= mt->round_deadline_ms) resolve_round_break(i); continue; }
         if (now >= mt->next_tick_deadline) run_tick(i);
     }
 }

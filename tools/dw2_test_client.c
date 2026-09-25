@@ -7,14 +7,28 @@
  * after all --place args). Prints every server message to stdout and exits 0 once MATCH_END
  * arrives (nonzero on any protocol/connection error), so two instances racing against the same
  * server can be scripted from a shell test and their exit codes/stdout diffed against hand-derived
- * expectations. */
+ * expectations.
+ *
+ * Round-break mini-game (EMILY/BACKLOG.md SECTION 548, core/round.h): by DEFAULT this tool does
+ * NOT respond to DW2_S_ROUND_BREAK at all -- it just prints it and keeps waiting for the next
+ * message, same as it always silently ignored/no-op'd through anything it didn't specifically
+ * script. That preserves this tool's own pre-redesign numeric behavior exactly (a no-call is
+ * graded DW2_GRADE_NONE with a fully neutral effect -- see core/round.h), so every existing
+ * scripts/build.sh invocation of this tool keeps producing byte-identical hand-derived results.
+ * `--round-call ROUND:CALL` (repeatable; CALL is "overcharge" or "brace") scripts a REAL, timed
+ * response for one specific round-break: on receiving ROUND_BREAK with that round_no, this tool
+ * sleeps until the server's own stated target_ms (read from the message itself, not hardcoded) and
+ * then sends ROUND_CALL -- the same real-time-skill-check action a human player would take, just
+ * automated for a reproducible smoke test. */
 #include "../core/net.h"
 #include <stdlib.h>
 #include "../core/protocol.h"
+#include "../core/round.h"
 
 #define MAX_PLACES 16
 
 typedef struct { int item, row, col, rot; } PlaceArg;
+typedef struct { int round_no, call; } RoundCallArg;
 
 static dw2_sock sock;
 static uint8_t inbuf[4096]; size_t inbuf_n = 0;
@@ -47,6 +61,7 @@ int main(int argc, char **argv) {
     const char *host = "127.0.0.1"; int port = 7800; const char *name = "tester";
     PlaceArg places[MAX_PLACES]; int place_n = 0;
     int cuts[MAX_PLACES]; int cut_n = 0;
+    RoundCallArg round_calls[MAX_PLACES]; int round_call_n = 0;
     int timeout_ms = 20000;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--host") && i + 1 < argc) host = argv[++i];
@@ -60,7 +75,16 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i], "--cut") && i + 1 < argc) {
             if (cut_n >= MAX_PLACES) { fprintf(stderr, "too many --cut args\n"); return 2; }
             cuts[cut_n++] = atoi(argv[++i]);
-        } else { fprintf(stderr, "usage: dw2_test_client --host H --port N --name NAME [--place ITEM,ROW,COL,ROT ...] [--cut IDX ...] [--timeout-ms N]\n"); return 2; }
+        } else if (!strcmp(argv[i], "--round-call") && i + 1 < argc) {
+            if (round_call_n >= MAX_PLACES) { fprintf(stderr, "too many --round-call args\n"); return 2; }
+            char callname[32]; int rn;
+            if (sscanf(argv[++i], "%d:%31[a-zA-Z]", &rn, callname) != 2) { fprintf(stderr, "bad --round-call %s (want ROUND:overcharge|brace)\n", argv[i]); return 2; }
+            int call;
+            if (!strcmp(callname, "overcharge")) call = DW2_CALL_OVERCHARGE;
+            else if (!strcmp(callname, "brace")) call = DW2_CALL_BRACE;
+            else { fprintf(stderr, "bad --round-call CALL %s (want overcharge|brace)\n", callname); return 2; }
+            round_calls[round_call_n].round_no = rn; round_calls[round_call_n].call = call; round_call_n++;
+        } else { fprintf(stderr, "usage: dw2_test_client --host H --port N --name NAME [--place ITEM,ROW,COL,ROT ...] [--cut IDX ...] [--round-call ROUND:overcharge|brace ...] [--timeout-ms N]\n"); return 2; }
     }
 
     if (dw2_net_init() != 0) { fprintf(stderr, "net init failed\n"); return 1; }
@@ -111,6 +135,33 @@ int main(int argc, char **argv) {
         } else if (m.type == DW2_S_TICK) {
             printf("TICK t=%u hull=%u/%u armor=%u/%u shatter=%u/%u\n", m.u.tick.elapsed_ticks, m.u.tick.hull_you, m.u.tick.hull_opp,
                    m.u.tick.armor_you, m.u.tick.armor_opp, m.u.tick.shatter_you, m.u.tick.shatter_opp);
+        } else if (m.type == DW2_S_ROUND_BREAK) {
+            printf("ROUND_BREAK round=%u behind=%u target_ms=%u budget_ms=%u\n", m.u.round_break.round_no,
+                   m.u.round_break.behind, m.u.round_break.target_ms, m.u.round_break.budget_ms);
+            /* Default (no matching --round-call): stay silent, exactly like this tool always
+             * behaved before the round-break redesign existed -- graded DW2_GRADE_NONE, a fully
+             * neutral effect (core/round.h), so scripts/build.sh's original hand-derived-number
+             * smoke test is unaffected by round-breaks now happening mid-match. */
+            for (int i = 0; i < round_call_n; i++) {
+                if (round_calls[i].round_no != (int)m.u.round_break.round_no) continue;
+                uint64_t recv_ms = dw2_now_ms();
+                uint32_t target = m.u.round_break.target_ms;
+                /* Sleep the REAL remaining time until target_ms (measured from our own receipt of
+                 * this message, matching what the server itself measures from send time -- the
+                 * server is authoritative on the actual elapsed gap, this is just aiming for it). */
+                dw2_sleep_ms((unsigned)target);
+                Dw2WireMsg call; memset(&call, 0, sizeof call); call.type = DW2_C_ROUND_CALL;
+                call.u.round_call.call = (uint8_t)round_calls[i].call;
+                send_msg(&call);
+                printf("ROUND_CALL round=%u call=%s (slept ~%ums toward target_ms=%u)\n", m.u.round_break.round_no,
+                       round_calls[i].call == DW2_CALL_OVERCHARGE ? "overcharge" : "brace",
+                       (unsigned)(dw2_now_ms() - recv_ms), target);
+                break;
+            }
+        } else if (m.type == DW2_S_ROUND_RESULT) {
+            printf("ROUND_RESULT your_call=%u your_grade=%u your_effect=%u opp_call=%u opp_grade=%u opp_effect=%u\n",
+                   m.u.round_result.your_call, m.u.round_result.your_grade, m.u.round_result.your_effect,
+                   m.u.round_result.opp_call, m.u.round_result.opp_grade, m.u.round_result.opp_effect);
         } else if (m.type == DW2_S_MATCH_END) {
             if (m.u.match_end.match_id != match_id) { fprintf(stderr, "MATCH_END for wrong match_id\n"); return 1; }
             printf("MATCH_END result=%u reason=%u ticks=%u\n", m.u.match_end.result, m.u.match_end.reason, m.u.match_end.ticks);

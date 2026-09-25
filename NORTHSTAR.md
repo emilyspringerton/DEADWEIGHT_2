@@ -188,6 +188,23 @@ A second bug (an inverted return-value check treating `recv_msg_blocking`'s `-1`
 truthy, so a genuinely auth-required server's silence never triggered the AUTH send at all) was
 found live testing the fix against a real `--iduna-url`-configured server and fixed the same pass.
 
+## D2 combat redesign: round-break mini-game, comeback, bluff — SECTION 548 (real V0, built and live-verified)
+
+Founder real-time, 2026-09-25: "like a mini game in between ship auto battler rounds to give a
+real time skill check" + "make the games swingy and give comeback mechanics and bluff strategies."
+Read as targeting D2 specifically (assumption named, not assumed silently — see the doc below).
+Full design write-up (the round-structure decision and why, the mini-game's real rules, the
+comeback trigger/effect, the bluff mechanism and what's actually hidden, real V0 vs. deferred
+scope) lives in `docs/COMBAT_REDESIGN.md` (golden-doc registered as `DEADWEIGHT2-COMBAT-NORTH`),
+not duplicated here. Short version: combat is now itself broken into `DW2_ROUND_TICKS`-tick
+rounds (`core/round.h`); between rounds, a real-time "Surge Timing" skill check plus a hidden
+Overcharge/Brace call (revealed to both sides only after both are locked in) resolves into a
+`dmg_mult` buff, an armor bonus, or (on a missed Overcharge) real self-damage — amplified further
+if the calling ship is behind on hull%, the actual comeback lever. Live-verified over the real
+wire protocol, not just unit-tested: a new `scripts/build.sh` smoke test scripts one side of an
+otherwise-perfectly-symmetric identical-loadout match (which hand-derives to an exact tie at tick
+24) to land one well-timed Overcharge call, turning that tie into a real win at tick 21.
+
 ## Deferred (not yet built)
 
 Everything `DEADWEIGHT/NORTHSTAR.md` already deferred still applies here: the options-pricing/

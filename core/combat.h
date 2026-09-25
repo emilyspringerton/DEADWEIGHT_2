@@ -46,6 +46,10 @@ typedef struct {
     float armor;
     int cargo_value;
     int shatter_events;                     /* test-observable: how many times Back-EMF has fired */
+    float dmg_mult;                         /* multiplies this ship's OWN weapon damage output for
+                                              * the current round of ticks -- 1.0 = neutral. Set by
+                                              * a graded round-break call (core/round.h); a ship
+                                              * that doesn't call, or calls Brace, stays at 1.0. */
 } Dw2Ship;
 
 typedef enum { DW2_RESULT_ONGOING = 0, DW2_RESULT_SELF_WIN, DW2_RESULT_ENEMY_WIN, DW2_RESULT_TIE } Dw2MatchResult;

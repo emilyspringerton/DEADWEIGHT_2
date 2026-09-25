@@ -4,6 +4,7 @@
  * No SDL dependency -- this binary is the "done" bar, not a follow-up. */
 #include "../core/combat.h"
 #include "../core/dummy.h"
+#include "../core/round.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -237,6 +238,115 @@ static void test_dummy_ship_fuzz(void) {
     CHECK(1); /* reaching here without an ASan/UBSan abort is the actual assertion */
 }
 
+/* ---- Round-break mini-game (EMILY/BACKLOG.md SECTION 548, core/round.h) ----
+ * Pure-logic tests: no networking, no timing flakiness -- the wire-protocol smoke test in
+ * scripts/build.sh proves the end-to-end mechanism (real server-measured elapsed time, real combat
+ * outcome change); these tests exhaustively pin down the exact grading table and the comeback
+ * amplification by value, which a single scripted network match can't cheaply cover. */
+
+static void test_round_target_and_grading_windows(void) {
+    uint16_t target = dw2_round_target_ms(12345u, 3);
+    CHECK(target >= DW2_ROUND_TARGET_MIN_MS && target < DW2_ROUND_TARGET_MIN_MS + DW2_ROUND_TARGET_MS_SPAN);
+    CHECK(dw2_round_target_ms(12345u, 3) == target); /* deterministic: same (seed, round) -> same target */
+
+    int grade;
+    dw2_round_grade(12345u, 3, DW2_CALL_BRACE, 0, target, 0, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); /* exact hit */
+    dw2_round_grade(12345u, 3, DW2_CALL_BRACE, 0, target - DW2_ROUND_PERFECT_MS, 0, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); /* early side, boundary inclusive */
+    dw2_round_grade(12345u, 3, DW2_CALL_BRACE, 0, (uint32_t)target + DW2_ROUND_PERFECT_MS, 0, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); /* late side, boundary inclusive */
+    dw2_round_grade(12345u, 3, DW2_CALL_BRACE, 0, (uint32_t)target + DW2_ROUND_PERFECT_MS + 1, 0, &grade);
+    CHECK(grade == DW2_GRADE_GOOD);
+    dw2_round_grade(12345u, 3, DW2_CALL_BRACE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS, 0, &grade);
+    CHECK(grade == DW2_GRADE_GOOD); /* boundary inclusive */
+    dw2_round_grade(12345u, 3, DW2_CALL_BRACE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 0, &grade);
+    CHECK(grade == DW2_GRADE_MISS);
+}
+
+static void test_round_overcharge_payoffs(void) {
+    /* Overcharge: high ceiling, real risk (self-damage on MISS), comeback-amplified when behind. */
+    int grade; Dw2RoundEffect e;
+    uint16_t target = dw2_round_target_ms(777u, 1);
+
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, target, 0, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.dmg_mult == 1.5f); CHECK(e.self_damage == 0.0f); CHECK(e.armor_bonus == 0.0f);
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, target, 1, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.dmg_mult == 2.0f); /* behind: comeback amplifies */
+
+    uint32_t good_ms = (uint32_t)target + DW2_ROUND_PERFECT_MS + 1;
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, good_ms, 0, &grade);
+    CHECK(grade == DW2_GRADE_GOOD); CHECK(e.dmg_mult == 1.25f);
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, good_ms, 1, &grade);
+    CHECK(grade == DW2_GRADE_GOOD); CHECK(e.dmg_mult == 1.5f); /* behind GOOD == ahead PERFECT: real teeth */
+
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 0, &grade);
+    CHECK(grade == DW2_GRADE_MISS);
+    CHECK(e.dmg_mult == 1.0f); CHECK(e.self_damage == DW2_ROUND_OVERCHARGE_BACKFIRE_HULL); /* the real risk */
+}
+
+static void test_round_brace_payoffs(void) {
+    /* Brace: safe, low ceiling -- MISS costs nothing, matching Overcharge's own real risk. */
+    int grade; Dw2RoundEffect e;
+    uint16_t target = dw2_round_target_ms(888u, 2);
+
+    e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, target, 0, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.armor_bonus == 25.0f); CHECK(e.dmg_mult == 1.0f); CHECK(e.self_damage == 0.0f);
+    e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, target, 1, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.armor_bonus == 35.0f); /* behind: comeback amplifies */
+
+    e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 0, &grade);
+    CHECK(grade == DW2_GRADE_MISS);
+    CHECK(e.armor_bonus == 0.0f); CHECK(e.self_damage == 0.0f); /* no penalty: the safe call */
+}
+
+static void test_round_no_call_is_neutral(void) {
+    /* A player who never engages with the mini-game is neither punished nor rewarded. */
+    int grade;
+    Dw2RoundEffect e = dw2_round_grade(1u, 1, DW2_CALL_OVERCHARGE, /*no_call=*/1, 999999u, /*behind=*/1, &grade);
+    CHECK(grade == DW2_GRADE_NONE);
+    CHECK(e.dmg_mult == 1.0f); CHECK(e.armor_bonus == 0.0f); CHECK(e.self_damage == 0.0f);
+}
+
+static void test_round_apply_effect(void) {
+    Dw2Ship s; dw2_ship_init(&s); dw2_ship_start_combat(&s);
+    CHECK(s.dmg_mult == 1.0f);
+
+    float armor_before = s.armor;
+    Dw2RoundEffect e_brace = { 1.0f, 20.0f, 0.0f };
+    dw2_ship_apply_round_effect(&s, e_brace);
+    CHECK(s.armor == armor_before + 20.0f);
+    CHECK(s.dmg_mult == 1.0f);
+
+    Dw2RoundEffect e_overcharge_perfect = { 1.5f, 0.0f, 0.0f };
+    dw2_ship_apply_round_effect(&s, e_overcharge_perfect);
+    CHECK(s.dmg_mult == 1.5f); /* live buff for the NEXT round of ticks */
+
+    s.hull_pct = 5.0f;
+    Dw2RoundEffect e_backfire = { 1.0f, 0.0f, DW2_ROUND_OVERCHARGE_BACKFIRE_HULL };
+    dw2_ship_apply_round_effect(&s, e_backfire);
+    CHECK(s.hull_pct == 0.0f); /* clamped, never negative -- same convention as combat damage */
+    CHECK(s.dmg_mult == 1.0f); /* this MISS's own neutral dmg_mult resets the earlier buff */
+}
+
+static void test_dmg_mult_scales_damage(void) {
+    /* combat.c wiring: dw2_ship_tick must scale the attacker's own outgoing damage by dmg_mult.
+     * Same Generator->Conductor->Railgun shape as test_straight_chain_fires; dmg_mult=2.0 doubles
+     * the hit exactly, dmg_mult defaulting to 1.0 (untouched) reproduces that original test. */
+    Dw2Ship attacker; dw2_ship_init(&attacker);
+    dw2_ship_place(&attacker, DW2_ITEM_GENERATOR, 0, 0, 0);
+    dw2_ship_place(&attacker, DW2_ITEM_CONDUCTOR, 0, 1, 0);
+    dw2_ship_place(&attacker, DW2_ITEM_RAILGUN, 0, 2, 0);
+    dw2_ship_start_combat(&attacker);
+    attacker.dmg_mult = 2.0f;
+    Dw2Ship target; dw2_ship_init(&target); dw2_ship_start_combat(&target);
+
+    dw2_ship_tick(&attacker, &target); CHECK(target.hull_pct == 100.0f);
+    dw2_ship_tick(&attacker, &target); CHECK(target.hull_pct == 100.0f);
+    dw2_ship_tick(&attacker, &target); /* 3rd tick: fires */
+    CHECK(target.hull_pct == 100.0f - 2.0f * DW2_WEAPON_DAMAGE);
+}
+
 int main(void) {
     test_placement_legality();
     test_rotation_math();
@@ -249,6 +359,12 @@ int main(void) {
     test_panic_cut_mid_fight_changes_routing();
     test_match_result_timeout_tiebreak();
     test_dummy_ship_fuzz();
+    test_round_target_and_grading_windows();
+    test_round_overcharge_payoffs();
+    test_round_brace_payoffs();
+    test_round_no_call_is_neutral();
+    test_round_apply_effect();
+    test_dmg_mult_scales_damage();
     printf("test_core_loop: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

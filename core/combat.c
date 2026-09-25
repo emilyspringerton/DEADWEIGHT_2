@@ -5,6 +5,7 @@ void dw2_ship_init(Dw2Ship *s) {
     memset(s, 0, sizeof(*s));
     for (int i = 0; i < DW2_MAX_PLACEMENTS; i++) s->placements[i].item_id = -1;
     s->hull_pct = 100.0f;
+    s->dmg_mult = 1.0f;
 }
 
 int dw2_ship_place(Dw2Ship *s, int item_id, int anchor_row, int anchor_col, int rotation) {
@@ -64,6 +65,7 @@ void dw2_ship_start_combat(Dw2Ship *s) {
     s->hull_pct = 100.0f;
     s->armor = 0;
     s->cargo_value = 0;
+    s->dmg_mult = 1.0f;
     for (int p = 0; p < s->placement_n; p++) {
         if (s->placements[p].item_id < 0) continue;
         s->cargo_value += dw2_catalog[s->placements[p].item_id].value;
@@ -214,7 +216,10 @@ void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
         if (self->placements[p].item_id < 0) continue;
         if (self->weapon_charge[p] >= DW2_WEAPON_CHARGE_THRESHOLD) {
             self->weapon_charge[p] -= DW2_WEAPON_CHARGE_THRESHOLD;
-            dw2_ship_apply_damage(enemy, DW2_WEAPON_DAMAGE);
+            /* dmg_mult (core/round.h): a graded Overcharge round-break call scales this ship's own
+             * outgoing damage for the current round; 1.0 (the default) is byte-identical to pre-
+             * round-break behavior. */
+            dw2_ship_apply_damage(enemy, DW2_WEAPON_DAMAGE * self->dmg_mult);
         }
     }
 }
