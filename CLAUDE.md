@@ -66,6 +66,22 @@ emily changelog add DEADWEIGHT_2 "<what changed>"
 # or manually: append a dated bullet under ## YYYY-MM-DD in CHANGELOG.md
 ```
 
+## CONSTRUCT File Generation (standing instruction, monorepo Principle 21)
+
+D2 auto-generates a CONSTRUCT file on every CI run (`.github/workflows/ci.yml`, "Generate Source
+Construct" + "Bundle clients + construct"): a deterministic, git-ls-files-based plaintext snapshot
+of all tracked source, verified byte-for-byte reproducible on every run (generated twice, `cmp`'d).
+Set up like SHANKPIT's own `release.yml` (founder real-time, 2026-09-25): the CONSTRUCT is copied
+into each real client's own bundle directory before zipping (`D2_Client_<build>.zip`,
+`D2_Local_<build>.zip`), not just uploaded on its own. It also ships standalone, separately, as
+both `.zip` and `.gz` (a deliberate, explicit exception to this monorepo's LZ4-by-default
+convention, per that same real-time instruction). Every artifact filename carries a `build_<run
+number>_<short sha>` tag (SHANKPIT's own convention) so consecutive CI runs never collide under a
+generic name. No GitHub Releases/tags yet -- CI build artifacts only (`actions/upload-artifact`);
+see `scripts/generate_construct.sh` for local generation (`bash scripts/generate_construct.sh
+[OUT.txt]`). No manual edits to the generated file -- it's regenerated from tracked source every
+run.
+
 ## Golden Doc Registration
 
 Any new NORTHSTAR.md/architecture doc here must be added to

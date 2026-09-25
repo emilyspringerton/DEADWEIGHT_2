@@ -1,17 +1,25 @@
-name: DEADWEIGHT_2 CI
+name: D2 CI
 
 on:
   push:
   pull_request:
 
-# Real, current scope only: build + run scripts/build.sh's own ASan/UBSan test suite (core loop,
-# the SDL2 debug shell's headless --selftest, and D2's dw2_server + a full wire-protocol smoke
-# match). No auto-release/versioning yet -- unlike DEADWEIGHT's own ci.yml, this repo has never
-# shipped a binary release; that's real, separate, not-yet-decided scope (D3, a real client, is
-# the natural point to revisit it), not an oversight.
+# Build + test (scripts/build.sh's own ASan/UBSan suite: core loop, the SDL2 debug shell's headless
+# --selftest, dw2_server + a full wire-protocol smoke match, and dw2_client's own headless smoke
+# match), then a Principle 21 CONSTRUCT snapshot bundled into each real client -- same pattern as
+# SHANKPIT's own release.yml ("Generate Source Construct" + "Bundle Artifacts": copy the CONSTRUCT
+# into each client's own release folder before zipping, founder real-time 2026-09-25: "set it up
+# like SHANKPIT where the construct is emitted in the clients"). Every artifact filename carries
+# the run number + short SHA (SHANKPIT's own ${BUILD} convention, e.g. ShankPit_Client_${BUILD}.zip)
+# so consecutive downloads never collide under a generic name (founder real-time: "ensure the
+# releases dont have generic names that will collide when you download the different versions").
+# The CONSTRUCT itself also ships standalone in both zip and gz (founder real-time: "separate as a
+# zip and a gz") -- a deliberate deviation from this monorepo's LZ4-by-default convention (root
+# CLAUDE.md), per that same real-time instruction. No GitHub Releases/tags yet -- CI build
+# artifacts only; real, separate, not-yet-decided scope if binary releases are wanted later.
 jobs:
   build:
-    name: Build + test
+    name: Build, test, construct
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,3 +27,45 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - name: Build + test
         run: ./scripts/build.sh
+
+      - name: Generate Source Construct
+        run: |
+          set -euo pipefail
+          bash scripts/generate_construct.sh D2_CONSTRUCT.txt
+          bash scripts/generate_construct.sh D2_CONSTRUCT.txt.check
+          if ! cmp D2_CONSTRUCT.txt D2_CONSTRUCT.txt.check; then
+            echo "ERROR: CONSTRUCT not deterministic!"
+            diff D2_CONSTRUCT.txt D2_CONSTRUCT.txt.check || true
+            exit 1
+          fi
+          rm D2_CONSTRUCT.txt.check
+
+      - name: Bundle clients + construct (collision-safe names)
+        run: |
+          set -euo pipefail
+          BUILD="build_${{ github.run_number }}_${GITHUB_SHA::7}"
+
+          rm -rf D2_Client D2_Local
+          mkdir -p D2_Client D2_Local
+          cp build/dw2_client D2_Client/
+          cp D2_CONSTRUCT.txt D2_Client/
+          zip -r "D2_Client_${BUILD}.zip" D2_Client
+
+          cp build/dw2_local D2_Local/
+          cp D2_CONSTRUCT.txt D2_Local/
+          zip -r "D2_Local_${BUILD}.zip" D2_Local
+
+          # Standalone CONSTRUCT, separate from the per-client copies above, in both zip and gz.
+          cp D2_CONSTRUCT.txt "D2_CONSTRUCT_${BUILD}.txt"
+          zip "D2_CONSTRUCT_${BUILD}.zip" "D2_CONSTRUCT_${BUILD}.txt"
+          gzip -k "D2_CONSTRUCT_${BUILD}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: D2_Builds_${{ github.run_number }}_${{ github.sha }}
+          path: |
+            D2_Client_*.zip
+            D2_Local_*.zip
+            D2_CONSTRUCT_*.zip
+            D2_CONSTRUCT_*.txt.gz
+          if-no-files-found: error
