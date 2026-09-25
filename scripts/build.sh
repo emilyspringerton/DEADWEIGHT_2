@@ -3,9 +3,13 @@
 # Needs libsdl2-dev (pkg-config sdl2) for the debug shell; the headless core-loop tests and
 # dw2_server have no SDL dependency at all. Anything that fails stops the script (set -e),
 # matching DEADWEIGHT's own scripts/build.sh convention.
+# DW2_VERSION (env var, default 0.0.0-dev) stamps into every binary via -DDW2_VERSION; only
+# apps/server/main.c (version.h) actually reads it today (dw2_server --version), same "define it
+# globally, only some binaries consume it" convention as DEADWEIGHT's own DW_VERSION.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-CFLAGS_BASE="-std=c99 -Wall -Wextra -Werror -Icore -DPARENA_NO_GRAPHICS"
+VERSION="${DW2_VERSION:-0.0.0-dev}"
+CFLAGS_BASE="-std=c99 -Wall -Wextra -Werror -Icore -DPARENA_NO_GRAPHICS -DDW2_VERSION=\"$VERSION\""
 # PARENA_NO_GRAPHICS: core/parena_runtime.h's own documented escape hatch (see docs/
 # LO_CANNON_PROGRAMMING.md) -- D2's cannon decision functions are pure base4 I32 logic with zero
 # graphics surface, so this skips the SDL2/SDL2_ttf include core/combat.c would otherwise pull in

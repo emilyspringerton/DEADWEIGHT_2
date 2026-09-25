@@ -4,6 +4,17 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
+# Serialize runs per ref: parallel pushes could both compute the same next tag and race each other
+# publishing it (DEADWEIGHT hit this for real, 2026-09-18 -- see its own ci.yml comment). Queued
+# (not cancelled) so each run sees the previous run's tag; GitHub keeps only the newest pending
+# run, which is fine because it builds the newest commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
 # Build + test (scripts/build.sh's own ASan/UBSan suite: core loop, the SDL2 debug shell's headless
 # --selftest, dw2_server + a full wire-protocol smoke match, and dw2_client's own headless smoke
 # match), then a Principle 21 CONSTRUCT snapshot bundled into each real client -- same pattern as
@@ -15,18 +26,49 @@ on:
 # releases dont have generic names that will collide when you download the different versions").
 # The CONSTRUCT itself also ships standalone in both zip and gz (founder real-time: "separate as a
 # zip and a gz") -- a deliberate deviation from this monorepo's LZ4-by-default convention (root
-# CLAUDE.md), per that same real-time instruction. No GitHub Releases/tags yet -- CI build
-# artifacts only; real, separate, not-yet-decided scope if binary releases are wanted later.
+# CLAUDE.md), per that same real-time instruction.
+#
+# Every green push to main auto-bumps the MINOR version, tags, and cuts a GitHub Release (dw2_server/
+# dw2_client/dw2_local + the CONSTRUCT) matching DEADWEIGHT's own auto-release pattern (EMILY/
+# BACKLOG.md SECTION 551, founder real-time 2026-09-25: "make it like D1 ... ensure we have auto
+# release we still dont have it it needs to be auto release first then all the rest"). D2 has no
+# Windows/Android build surface (unlike D1) -- only Linux binaries are produced or released.
 jobs:
+  version:
+    name: Compute version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" = "refs/heads/main" ] && [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            latest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+            if [ -z "$latest" ]; then major=0; minor=0; else
+              ver="${latest#v}"; major="$(echo "$ver" | cut -d. -f1)"; minor="$(echo "$ver" | cut -d. -f2)"; fi
+            tag="v${major}.$((minor + 1)).0"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build, test, construct
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install SDL2
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - name: Build + test
-        run: ./scripts/build.sh
+        run: DW2_VERSION=${{ needs.version.outputs.version }} ./scripts/build.sh
 
       - name: Generate Source Construct
         run: |
@@ -69,3 +111,111 @@ jobs:
             D2_CONSTRUCT_*.zip
             D2_CONSTRUCT_*.txt.gz
           if-no-files-found: error
+
+      # Separate, flat artifact (no directory prefixes) purely for the release job below to consume
+      # -- plain, unzipped binaries + the raw CONSTRUCT, matching DEADWEIGHT's own linux-* release
+      # artifact convention so `cp artifacts/D2_Release_Bin_*/dw2_server ...` in the release job is
+      # unambiguous.
+      - name: Stage release binaries
+        run: |
+          set -euo pipefail
+          mkdir -p release_bin
+          cp build/dw2_server release_bin/
+          cp build/dw2_client release_bin/
+          cp build/dw2_local release_bin/
+          cp D2_CONSTRUCT.txt release_bin/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: D2_Release_Bin_${{ github.run_number }}
+          path: release_bin/*
+          if-no-files-found: error
+
+  release:
+    name: Tag & Release
+    needs: [version, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir out
+          cp artifacts/D2_Release_Bin_*/dw2_server "out/dw2_server_linux_x86_64"
+          cp artifacts/D2_Release_Bin_*/dw2_client "out/dw2_client_linux_x86_64"
+          cp artifacts/D2_Release_Bin_*/dw2_local "out/dw2_local_linux_x86_64"
+          cp artifacts/D2_Release_Bin_*/D2_CONSTRUCT.txt out/
+          # Create the tag server-side via the release API (--target). A plain `git push origin $TAG` from the runner is
+          # rejected ("refusing to allow a GitHub App to create or update workflow ... without `workflows`
+          # permission") because the GITHUB_TOKEN treats the workflow file in history as part of the new ref.
+          gh release create "$TAG" out/* --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+
+      # S528/S551, founder real-time: "we need an app repository in IDUNA signed in github somehow
+      # with emily session new for the build before each build ... figure out how to sign them
+      # with gpg keys". See IDUNA/docs/APP_RELEASE_SIGNING.md for the full mechanism (real,
+      # live-verified end to end there) and the one manual step still open: the two secrets this
+      # step reads (EINHORN_APP_RELEASES_GPG_PRIVATE_KEY, APP_RELEASES_CI_SECRET) haven't been
+      # added to this repo yet -- a human-only step, same class as every other secret in this
+      # monorepo. Until they exist, this step degrades to a clean, logged no-op rather than
+      # failing the whole job (a missing secret must never break an otherwise-green build). Copied
+      # from DEADWEIGHT's own "Sign + publish to IDUNA app-release registry" step (its `gui` job)
+      # almost verbatim; the one real change is app_slug="d2" (IDUNA/internal/games/games.go
+      # Registry["d2"]) in place of "deadweight". Signs each of the three D2 binaries separately
+      # (server/client/local), keyed by distinct platform strings since all three share the same
+      # linux_x86_64 architecture -- DEADWEIGHT's own two-package loop keys on actual platform
+      # (linux vs windows) because it only ever signs one binary (dw_gui) per platform.
+      - name: Sign + publish to IDUNA app-release registry
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.EINHORN_APP_RELEASES_GPG_PRIVATE_KEY }}
+          APP_RELEASES_CI_SECRET: ${{ secrets.APP_RELEASES_CI_SECRET }}
+          IDUNA_BASE_URL: https://okemily.com
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY:-}" ] || [ -z "${APP_RELEASES_CI_SECRET:-}" ]; then
+            echo "app-release signing secrets not configured yet -- skipping publish (see IDUNA/docs/APP_RELEASE_SIGNING.md)"
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEYID="A9BEEFEC4DF16C2E"
+
+          # Real emily session new (public sibling repo, no token needed -- same pattern as
+          # DEADWEIGHT's own step) as a free, cheap, per-build provenance tag. EMILY_ROOT points at
+          # a throwaway CI workspace dir -- emily session new creates it itself.
+          git clone --depth 1 https://github.com/emilyspringerton/emily.cli.git /tmp/emily-cli
+          ( cd /tmp/emily-cli && go build -o /tmp/emily . )
+          SESSION_TAG="$(EMILY_ROOT=/tmp/emily-root /tmp/emily session new | grep '^tag:' | awk '{print $2}')"
+          echo "build session tag: $SESSION_TAG"
+
+          for pkg in out/dw2_server_linux_x86_64:server_linux_x86_64 out/dw2_client_linux_x86_64:client_linux_x86_64 out/dw2_local_linux_x86_64:local_linux_x86_64; do
+            file="${pkg%%:*}"; platform="${pkg##*:}"
+            gpg --batch --yes --local-user "$KEYID" --detach-sign --armor -o "$file.sig" "$file"
+
+            TOKEN="$(curl -sf -X POST "$IDUNA_BASE_URL/api/v1/auth/agent" \
+              -H 'Content-Type: application/json' \
+              -d "{\"agent_name\":\"APP-RELEASES-CI\",\"agent_secret\":\"$APP_RELEASES_CI_SECRET\"}" \
+              | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")"
+
+            curl -sf -X POST "$IDUNA_BASE_URL/api/v1/app-releases" \
+              -H "Authorization: Bearer $TOKEN" \
+              -F "binary=@${file}" \
+              -F "app_slug=d2" \
+              -F "platform=${platform}" \
+              -F "version=${{ needs.version.outputs.version }}" \
+              -F "session_tag=${SESSION_TAG}" \
+              -F "gpg_signature=$(cat "${file}.sig")" \
+              -F "gpg_key_id=${KEYID}" \
+              -F "github_commit_sha=${GITHUB_SHA}" \
+              -F "github_run_url=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "published ${file} (${platform})"
+          done

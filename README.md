@@ -61,6 +61,9 @@ split.
   clean) as part of every build.
 - CI (`.github/workflows/ci.yml`) generates a Principle 21 CONSTRUCT snapshot on every run and
   bundles it into each client's own zip, plus standalone `.zip`/`.gz` copies, as build artifacts.
+  Every green push to `main` also auto-bumps the minor version, tags it, and publishes a real
+  GitHub Release (`dw2_server`/`dw2_client`/`dw2_local` + the CONSTRUCT) — see "CI / releases"
+  below.
 
 **What's not built yet, honestly:** no real art or shop/HUD chrome for `dw2_client` (colored
 rectangles only, same as the debug shell; the round-break's own target/timer is console-printed
@@ -70,8 +73,10 @@ a live, reactive opponent), no real bot (D4, so no bot decision logic for the ro
 cannon programming either), no charge-banking payoff for a cannon program that holds fire (so the
 example "hold on a safe lead" program isn't wired live — see `docs/LO_CANNON_PROGRAMMING.md`), no
 general "any combat decision can be a PARENA mod" framework (D5 — cannon programming is one real,
-narrow slice of that idiom, not the whole thing), no GitHub Releases/code signing yet (CI produces
-build artifacts, not tagged releases). See `NORTHSTAR.md`'s "Deferred" section,
+narrow slice of that idiom, not the whole thing). GPG-signed IDUNA app-release publishing is wired
+into CI (same mechanism DEADWEIGHT uses, `app_slug="d2"`) but degrades to a clean no-op until its
+two GitHub Actions secrets are actually provisioned on this repo — see "CI / releases" below and
+`IDUNA/docs/APP_RELEASE_SIGNING.md`. See `NORTHSTAR.md`'s "Deferred" section,
 `docs/COMBAT_REDESIGN.md`'s own "Deferred" section, and `docs/LO_CANNON_PROGRAMMING.md`'s own
 "Deferred" section for the real phased plan.
 
@@ -117,6 +122,17 @@ ESC   quit
 
 Feedback (placements, cuts, per-tick hull%) prints to the terminal — the SDL window itself is
 deliberately bare-minimum (colored rectangles only) at this phase.
+
+## CI / releases
+
+`.github/workflows/ci.yml`: every push builds/tests everything and bundles the CONSTRUCT; every
+green push to `main` auto-bumps the minor version, tags it (`vX.Y.0`), and publishes a real GitHub
+Release with `dw2_server_linux_x86_64`, `dw2_client_linux_x86_64`, `dw2_local_linux_x86_64`, and
+`D2_CONSTRUCT.txt` attached (Linux-only — D2 has no Windows/Android build surface, unlike
+DEADWEIGHT). The same job GPG-signs each binary and publishes it to IDUNA's app-release registry
+(`app_slug="d2"`, `IDUNA/docs/APP_RELEASE_SIGNING.md`) — this step no-ops cleanly until its two
+GitHub Actions secrets are provisioned on this repo, same current state as DEADWEIGHT's own copy
+of the same step.
 
 ## License
 

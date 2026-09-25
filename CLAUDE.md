@@ -103,10 +103,31 @@ into each real client's own bundle directory before zipping (`D2_Client_<build>.
 both `.zip` and `.gz` (a deliberate, explicit exception to this monorepo's LZ4-by-default
 convention, per that same real-time instruction). Every artifact filename carries a `build_<run
 number>_<short sha>` tag (SHANKPIT's own convention) so consecutive CI runs never collide under a
-generic name. No GitHub Releases/tags yet -- CI build artifacts only (`actions/upload-artifact`);
-see `scripts/generate_construct.sh` for local generation (`bash scripts/generate_construct.sh
-[OUT.txt]`). No manual edits to the generated file -- it's regenerated from tracked source every
-run.
+generic name. It's also attached as `D2_CONSTRUCT.txt` to every real GitHub Release (see "CI /
+auto-release" below). See `scripts/generate_construct.sh` for local generation (`bash
+scripts/generate_construct.sh [OUT.txt]`). No manual edits to the generated file -- it's
+regenerated from tracked source every run.
+
+## CI / auto-release (EMILY/BACKLOG.md SECTION 551)
+
+Every green push to `main` auto-bumps the MINOR version (`git tag -l 'v[0-9]*.[0-9]*.[0-9]*'
+--sort=-v:refname`, same exact logic as DEADWEIGHT's own `version` job — copied verbatim, it's
+already been through one real bug fix there, a parallel-push tag race, 2026-09-18), tags it, and
+publishes a real GitHub Release (`dw2_server_linux_x86_64`, `dw2_client_linux_x86_64`,
+`dw2_local_linux_x86_64`, `D2_CONSTRUCT.txt`) via `gh release create ... --target "$GITHUB_SHA"`
+(a plain `git push origin $TAG` is rejected for workflow-permission reasons, same as DEADWEIGHT).
+D2 has no Windows/Android build surface, so only Linux binaries are built or released — do not add
+those targets without a real, separate scoping pass (see the root CLAUDE.md's own D2 row).
+`DW2_VERSION` (env var, default `0.0.0-dev`) is threaded through `scripts/build.sh` into
+`-DDW2_VERSION`, which `apps/server/version.h`/`main.c` reads for `dw2_server --version`.
+
+The same `release` job GPG-signs each of the three binaries and publishes them to IDUNA's
+app-release registry (`POST /api/v1/app-releases`, `app_slug="d2"` — `IDUNA/internal/games/
+games.go` `Registry["d2"]`), matching DEADWEIGHT's own step (`IDUNA/docs/APP_RELEASE_SIGNING.md`)
+almost verbatim, including its clean no-op-and-exit-0 gate on the two secrets
+(`EINHORN_APP_RELEASES_GPG_PRIVATE_KEY`, `APP_RELEASES_CI_SECRET`) — neither is provisioned on
+this repo yet, same as DEADWEIGHT's own current state, so this step logs a skip message and exits
+0 rather than failing an otherwise-green build.
 
 ## Golden Doc Registration
 
