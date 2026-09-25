@@ -31,8 +31,12 @@ concurrency:
 # Every green push to main auto-bumps the MINOR version, tags, and cuts a GitHub Release (dw2_server/
 # dw2_client/dw2_local + the CONSTRUCT) matching DEADWEIGHT's own auto-release pattern (EMILY/
 # BACKLOG.md SECTION 551, founder real-time 2026-09-25: "make it like D1 ... ensure we have auto
-# release we still dont have it it needs to be auto release first then all the rest"). D2 has no
-# Windows/Android build surface (unlike D1) -- only Linux binaries are produced or released.
+# release we still dont have it it needs to be auto release first then all the rest").
+#
+# Windows: SECTION 551 follow-up, founder real-time 2026-09-25: "can we add windows client to
+# deadweight 2 artifact releases". Unlike DEADWEIGHT's own dw_gui.exe, no mbedTLS cross-build is
+# needed (D2's http.h is plain-HTTP-only) -- see docs/WINDOWS_CLIENT_BUILD.md. Scoped to the
+# client only, matching the literal ask; dw2_server/dw2_local stay Linux-only for now.
 jobs:
   version:
     name: Compute version
@@ -131,9 +135,64 @@ jobs:
           path: release_bin/*
           if-no-files-found: error
 
+  windows:
+    name: Windows cross-build (mingw)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw + SDL2-mingw
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y mingw-w64 file zip
+          wget -q https://www.libsdl.org/release/SDL2-devel-2.28.5-mingw.tar.gz
+          tar xzf SDL2-devel-2.28.5-mingw.tar.gz
+          mv SDL2-2.28.5/x86_64-w64-mingw32 ./sdl2_mingw
+      - name: Cross-compile dw2_client.exe
+        run: SDL2_MINGW=./sdl2_mingw DW2_VERSION=${{ needs.version.outputs.version }} ./scripts/build.sh --windows
+
+      # Same deterministic CONSTRUCT the Linux `build` job generates -- regenerated here rather
+      # than shared as a cross-job artifact, since it's cheap and this job already has a full
+      # checkout (see scripts/generate_construct.sh's own determinism guarantee).
+      - name: Generate Source Construct
+        run: bash scripts/generate_construct.sh D2_CONSTRUCT.txt
+
+      - name: Bundle Windows client (collision-safe name)
+        run: |
+          set -euo pipefail
+          BUILD="build_${{ github.run_number }}_${GITHUB_SHA::7}"
+          rm -rf D2_Client_Windows
+          mkdir -p D2_Client_Windows
+          cp build/dw2_client.exe D2_Client_Windows/
+          cp sdl2_mingw/bin/SDL2.dll D2_Client_Windows/
+          printf '%s\r\n' "start dw2_client.exe" > D2_Client_Windows/PLAY.bat
+          cp D2_CONSTRUCT.txt D2_Client_Windows/
+          zip -r "D2_Client_Windows_${BUILD}.zip" D2_Client_Windows
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: D2_Builds_Windows_${{ github.run_number }}_${{ github.sha }}
+          path: D2_Client_Windows_*.zip
+          if-no-files-found: error
+
+      # Flat artifact for the release job -- the exe + its DLL, matching D2_Release_Bin's own
+      # unzipped-binaries convention.
+      - name: Stage release binaries
+        run: |
+          set -euo pipefail
+          mkdir -p release_bin_windows
+          cp build/dw2_client.exe release_bin_windows/
+          cp sdl2_mingw/bin/SDL2.dll release_bin_windows/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: D2_ReleaseWin_Bin_${{ github.run_number }}
+          path: release_bin_windows/*
+          if-no-files-found: error
+
   release:
     name: Tag & Release
-    needs: [version, build]
+    needs: [version, build, windows]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -156,6 +215,8 @@ jobs:
           cp artifacts/D2_Release_Bin_*/dw2_client "out/dw2_client_linux_x86_64"
           cp artifacts/D2_Release_Bin_*/dw2_local "out/dw2_local_linux_x86_64"
           cp artifacts/D2_Release_Bin_*/D2_CONSTRUCT.txt out/
+          cp artifacts/D2_ReleaseWin_Bin_*/dw2_client.exe "out/dw2_client_windows_x86_64.exe"
+          cp artifacts/D2_ReleaseWin_Bin_*/SDL2.dll "out/SDL2.dll"
           # Create the tag server-side via the release API (--target). A plain `git push origin $TAG` from the runner is
           # rejected ("refusing to allow a GitHub App to create or update workflow ... without `workflows`
           # permission") because the GITHUB_TOKEN treats the workflow file in history as part of the new ref.

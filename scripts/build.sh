@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
-# Clean build + test for DEADWEIGHT_2. Usage: scripts/build.sh
+# Clean build + test for DEADWEIGHT_2. Usage: scripts/build.sh [--windows]
 # Needs libsdl2-dev (pkg-config sdl2) for the debug shell; the headless core-loop tests and
 # dw2_server have no SDL dependency at all. Anything that fails stops the script (set -e),
 # matching DEADWEIGHT's own scripts/build.sh convention.
 # DW2_VERSION (env var, default 0.0.0-dev) stamps into every binary via -DDW2_VERSION; only
 # apps/server/main.c (version.h) actually reads it today (dw2_server --version), same "define it
 # globally, only some binaries consume it" convention as DEADWEIGHT's own DW_VERSION.
+# --windows: cross-builds dw2_client.exe via mingw (x86_64-w64-mingw32-gcc), matching DEADWEIGHT's
+# own scripts/build.sh --windows convention (EMILY/BACKLOG.md SECTION 551 follow-up, founder
+# real-time 2026-09-25: "can we add windows client to deadweight 2 artifact releases"). Needs
+# mingw-w64 and an SDL2-mingw dev tree at $SDL2_MINGW (default ./sdl2_mingw) -- see docs/
+# WINDOWS_CLIENT_BUILD.md. Unlike DEADWEIGHT's own dw_gui.exe, no mbedTLS/TLS cross-build is
+# needed: D2's core/http.h is plain-HTTP-only (no PARENA_WITH_TLS anywhere in this repo), so the
+# Windows client links only -lws2_32 (winsock, via core/net.h's existing _WIN32 shim -- ported
+# from DEADWEIGHT already Windows-ready) and SDL2 itself.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ARGS=" $* "
 VERSION="${DW2_VERSION:-0.0.0-dev}"
 CFLAGS_BASE="-std=c99 -Wall -Wextra -Werror -Icore -DPARENA_NO_GRAPHICS -DDW2_VERSION=\"$VERSION\""
 # PARENA_NO_GRAPHICS: core/parena_runtime.h's own documented escape hatch (see docs/
@@ -151,5 +160,20 @@ gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
     tools/dw2_cannon_demo.c core/parena_runtime.c cannon/cannon_bank_on_safe_lead_gen.c \
     -o build/dw2_cannon_demo
 ./build/dw2_cannon_demo
+
+if [[ "$ARGS" == *" --windows "* ]]; then
+  echo "== D2: Windows cross-build (mingw) -- dw2_client.exe =="
+  SDLW="${SDL2_MINGW:-./sdl2_mingw}"
+  if [ ! -d "$SDLW/include/SDL2" ]; then
+    echo "needs an SDL2-mingw dev tree at $SDLW (or set SDL2_MINGW); see docs/WINDOWS_CLIENT_BUILD.md"
+    exit 1
+  fi
+  x86_64-w64-mingw32-gcc $CFLAGS_BASE -O2 -I"$SDLW/include" -I"$SDLW/include/SDL2" \
+      apps/client/main.c core/items.c core/combat.c core/round.c core/protocol.c core/http.c core/iduna.c $CANNON_SRC \
+      -o build/dw2_client.exe \
+      -L"$SDLW/lib" -lmingw32 -lSDL2 -lws2_32 -mwindows
+  file build/dw2_client.exe | grep -q PE32
+  echo "dw2_client.exe: $(file build/dw2_client.exe)"
+fi
 
 echo "BUILD CLEAN"

@@ -127,12 +127,16 @@ deliberately bare-minimum (colored rectangles only) at this phase.
 
 `.github/workflows/ci.yml`: every push builds/tests everything and bundles the CONSTRUCT; every
 green push to `main` auto-bumps the minor version, tags it (`vX.Y.0`), and publishes a real GitHub
-Release with `dw2_server_linux_x86_64`, `dw2_client_linux_x86_64`, `dw2_local_linux_x86_64`, and
-`D2_CONSTRUCT.txt` attached (Linux-only — D2 has no Windows/Android build surface, unlike
-DEADWEIGHT). The same job GPG-signs each binary and publishes it to IDUNA's app-release registry
+Release with `dw2_server_linux_x86_64`, `dw2_client_linux_x86_64`, `dw2_local_linux_x86_64`,
+`dw2_client_windows_x86_64.exe` + `SDL2.dll`, and `D2_CONSTRUCT.txt` attached. The Windows client
+is cross-compiled via mingw (structurally verified — real `PE32+` binary — but not yet
+runtime-tested on actual Windows; see `docs/WINDOWS_CLIENT_BUILD.md`); the server and local debug
+shell stay Linux-only for now (Android build surface still doesn't exist, unlike DEADWEIGHT). The
+same job GPG-signs each Linux binary and publishes it to IDUNA's app-release registry
 (`app_slug="d2"`, `IDUNA/docs/APP_RELEASE_SIGNING.md`) — this step no-ops cleanly until its two
 GitHub Actions secrets are provisioned on this repo, same current state as DEADWEIGHT's own copy
-of the same step.
+of the same step; the Windows client isn't in that signing loop yet (a cheap, named follow-on, not
+done in this pass).
 
 ## License
 

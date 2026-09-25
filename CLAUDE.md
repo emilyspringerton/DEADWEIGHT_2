@@ -116,8 +116,12 @@ already been through one real bug fix there, a parallel-push tag race, 2026-09-1
 publishes a real GitHub Release (`dw2_server_linux_x86_64`, `dw2_client_linux_x86_64`,
 `dw2_local_linux_x86_64`, `D2_CONSTRUCT.txt`) via `gh release create ... --target "$GITHUB_SHA"`
 (a plain `git push origin $TAG` is rejected for workflow-permission reasons, same as DEADWEIGHT).
-D2 has no Windows/Android build surface, so only Linux binaries are built or released — do not add
-those targets without a real, separate scoping pass (see the root CLAUDE.md's own D2 row).
+**Windows client added (SECTION 551 follow-up, 2026-09-25)**: a `windows` job cross-compiles
+`dw2_client.exe` via mingw (no mbedTLS needed — D2's `http.h` is plain-HTTP-only, unlike
+DEADWEIGHT's own Windows build) and attaches `dw2_client_windows_x86_64.exe` + `SDL2.dll` to every
+release. See `docs/WINDOWS_CLIENT_BUILD.md`. `dw2_server`/`dw2_local` and any Android build surface
+stay out of scope — do not add those without a real, separate scoping pass (see the root
+CLAUDE.md's own D2 row).
 `DW2_VERSION` (env var, default `0.0.0-dev`) is threaded through `scripts/build.sh` into
 `-DDW2_VERSION`, which `apps/server/version.h`/`main.c` reads for `dw2_server --version`.
 
