@@ -9,7 +9,7 @@ This is a separate repo from the sibling `DEADWEIGHT` (which shipped a different
 card-mode game first) — see `NORTHSTAR.md` for the full design provenance and why the two are
 split.
 
-## Status: Phase D1 + D2 — the core mechanic, a real multiplayer server, a real client, and a round-break mini-game are live
+## Status: Phase D1 + D2 — the core mechanic, a real multiplayer server, a real client, a round-break mini-game, and cannon programming are live
 
 **What's real today:**
 - The full core mechanic: 6x6 grid, 7 items (Generator/Conductor/Splitter Node for wiring,
@@ -44,7 +44,17 @@ split.
   (Overcharge) / B (Brace) keypress. `tools/dw2_test_client.c` stays the separate, scripted
   protocol-edge-case test tool it always was, now also scriptable for the round-break mini-game
   (`--round-call ROUND:overcharge|brace`).
-- A headless test suite (`tests/test_core_loop.c`, ASan+UBSan clean, 96 checks) that exercises
+- **Cannon programming** (EMILY/BACKLOG.md SECTION 549): the weapon-fire decision in
+  `dw2_ship_tick` is a real, compiled LO program (`cannon/cannon_decision.llll`, via `parena
+  build`'s own real C backend), not a hardcoded rule — packs `behind` (the same signal the
+  round-break comeback lever uses) and "would this shot be lethal" into one real, naturally-4-
+  valued state, matching LO's own real mod-4 ceiling. The shipped decision is FIRE in all 4 states
+  (byte-identical to the rule it replaces — every hand-derived match number in this README is
+  unchanged); a second, real, standalone-tested example program shows the same mechanism holding
+  fire on a safe, non-lethal lead. No sibling LO/PARENA checkout is needed to build or run D2 —
+  the generated C is committed; `scripts/generate_cannon.sh` regenerates it if a `.llll` source
+  changes. Full design in `docs/LO_CANNON_PROGRAMMING.md`.
+- A headless test suite (`tests/test_core_loop.c`, ASan+UBSan clean, 100 checks) that exercises
   every rule above — including the round-break grading/payoff table, with zero networking needed
   — with exact, hand-derived numbers, not just "it didn't crash." `scripts/build.sh` also runs
   `dw2_server` and `dw2_client` through full real matches over the actual wire protocol (ASan+UBSan
@@ -56,10 +66,14 @@ split.
 rectangles only, same as the debug shell; the round-break's own target/timer is console-printed
 only, no on-screen countdown), no real playtesting/balance pass on the round-break's timing
 windows or payoff numbers, no round-break during `apps/local`'s fixed dummy fight (bluffing needs
-a live, reactive opponent), no real bot (D4, so no bot decision logic for the round-break call
-either), no PARENA integration (D5), no GitHub Releases/code signing yet (CI produces build
-artifacts, not tagged releases). See `NORTHSTAR.md`'s "Deferred" section and
-`docs/COMBAT_REDESIGN.md`'s own "Deferred" section for the real phased plan.
+a live, reactive opponent), no real bot (D4, so no bot decision logic for the round-break call or
+cannon programming either), no charge-banking payoff for a cannon program that holds fire (so the
+example "hold on a safe lead" program isn't wired live — see `docs/LO_CANNON_PROGRAMMING.md`), no
+general "any combat decision can be a PARENA mod" framework (D5 — cannon programming is one real,
+narrow slice of that idiom, not the whole thing), no GitHub Releases/code signing yet (CI produces
+build artifacts, not tagged releases). See `NORTHSTAR.md`'s "Deferred" section,
+`docs/COMBAT_REDESIGN.md`'s own "Deferred" section, and `docs/LO_CANNON_PROGRAMMING.md`'s own
+"Deferred" section for the real phased plan.
 
 ## Build & run
 

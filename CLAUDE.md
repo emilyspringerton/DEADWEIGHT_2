@@ -7,8 +7,11 @@ repo, spun out into its own repo — see `NORTHSTAR.md` for the full why and the
 provenance (`DEADWEIGHT/NORTHSTAR.md` / `docs/SPEC_REVIEW.md` / `docs/PHASE_D1_CORE_LOOP.md`).
 Phase D1 (local-only core loop) and D2 (server-authoritative 1v1, `dw2_server` + the real
 interactive client `dw2_client` — folded into D2, not a separate D3, per founder real-time "just
-call it D2") are built and live-verified; a real bot and PARENA integration remain named,
-not-yet-built phases in `NORTHSTAR.md`'s "Deferred" section.
+call it D2") are built and live-verified, including a real-time round-break mini-game (SECTION
+548, `docs/COMBAT_REDESIGN.md`) and a real, compiled LO decision function wired into weapon fire
+(SECTION 549 "cannon programming," `docs/LO_CANNON_PROGRAMMING.md`); a real bot and the general
+"any combat decision can be a PARENA mod" framework remain named, not-yet-built phases in
+`NORTHSTAR.md`'s "Deferred" section.
 
 **Licensing: do not add the Unlicense to this repo.** Explicit founder instruction (2026-09-25),
 unlike `SKULDMARK`/`SPIDERBEETLE`'s own convention — licensing is deliberately left unresolved
@@ -17,8 +20,12 @@ here. Do not add any `LICENSE` file without a fresh, explicit ask.
 ## Stack
 
 Hand-written C99, no external dependencies for the core loop or `dw2_server`; SDL2 for the debug
-shell (`apps/local/`) and the real client (`apps/client/`). No PARENA yet — a real, named future
-phase in `NORTHSTAR.md`'s "Deferred" section.
+shell (`apps/local/`) and the real client (`apps/client/`). One real, narrow PARENA integration
+exists (`cannon/`, `core/cannon.{h,c}`, `core/parena_runtime.{h,c}` — see `docs/
+LO_CANNON_PROGRAMMING.md`): a weapon-fire decision compiled from LO through PARENA to committed C,
+needing no PARENA/LO checkout at ordinary build time (only `scripts/generate_cannon.sh`, when a
+`.llll` source changes, does). The general "any combat decision can be a PARENA mod" framework
+remains a real, named future phase in `NORTHSTAR.md`'s "Deferred" section.
 
 ```bash
 ./scripts/build.sh           # ASan+UBSan: core-loop tests, SDL debug shell + selftest, dw2_server + dw2_client wire-protocol smoke matches
@@ -42,6 +49,13 @@ phase in `NORTHSTAR.md`'s "Deferred" section.
   section can hold, matching DEADWEIGHT's own `docs/WIRE_PROTOCOL.md` if it does).
 - `core/net.h`/`http.{h,c}`/`iduna.{h,c}` — TCP/HTTP/IDUNA-client infra, ported from DEADWEIGHT's
   own (`dw2_`-prefixed, trimmed to what this game actually calls).
+- `core/round.{h,c}` — the round-break mini-game (Surge Timing skill check, Overcharge/Brace
+  bluff, comeback amplification); see `docs/COMBAT_REDESIGN.md` (SECTION 548).
+- `core/cannon.{h,c}` / `core/parena_runtime.{h,c}` / `cannon/` — "cannon programming": a real,
+  compiled LO decision function wired into `dw2_ship_tick`'s weapon-fire check; `cannon/*.llll` is
+  the real source, `cannon/*.prn`/`*_gen.c` are committed, generated (do not hand-edit; regenerate
+  via `scripts/generate_cannon.sh`); `parena_runtime.{h,c}` is vendored, unmodified, from PARENA.
+  See `docs/LO_CANNON_PROGRAMMING.md` (SECTION 549).
 - `apps/local/main.c` — the SDL2 debug shell (pack + fight, immediate-mode boxes only, no
   networking).
 - `apps/server/main.c` — `dw2_server`, the D2 authoritative match server (TCP, `poll()`, embedded
@@ -50,7 +64,12 @@ phase in `NORTHSTAR.md`'s "Deferred" section.
   over the actual wire protocol; `--selftest` drives the same real code paths headlessly).
 - `tools/dw2_test_client.c` — scripted headless test tool for exercising `dw2_server`'s protocol
   edge cases (reject paths, pack-deadline force-start, forfeit); not a real client.
+- `tools/dw2_cannon_demo.c` — standalone proof that a second, real LO decision program
+  (`cannon/cannon_bank_on_safe_lead.llll`) compiles and behaves as designed; not wired live.
 - `tests/test_core_loop.c` — headless ASan+UBSan test suite, the actual "done" bar for D1.
+- `tests/test_cannon_hold.c` — standalone `dw2_ship_tick` integration test for the cannon-
+  programming `HOLD` branch (needs its own binary — see `docs/LO_CANNON_PROGRAMMING.md`'s own
+  "why two binaries" note).
 
 ## Founder Real-Time Direction
 
