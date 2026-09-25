@@ -144,7 +144,14 @@ jobs:
       - name: Install mingw + SDL2-mingw
         run: |
           set -euo pipefail
-          sudo apt-get update && sudo apt-get install -y mingw-w64 file zip
+          # libsdl2-dev (native) is needed too, not just the mingw tree: scripts/build.sh --windows
+          # still runs the FULL native Linux suite first (core loop, dw2_local via pkg-config sdl2,
+          # dw2_server, dw2_client, round-break/cannon tests) before appending the Windows
+          # cross-compile on top -- same "always build native, --windows adds to it" convention
+          # DEADWEIGHT's own build.sh already established. Found live: this job originally omitted
+          # it, which happened to pass locally only because that sandbox already had libsdl2-dev
+          # installed from unrelated prior work -- a fresh CI runner has no such luck.
+          sudo apt-get update && sudo apt-get install -y mingw-w64 libsdl2-dev file zip
           wget -q https://www.libsdl.org/release/SDL2-devel-2.28.5-mingw.tar.gz
           tar xzf SDL2-devel-2.28.5-mingw.tar.gz
           mv SDL2-2.28.5/x86_64-w64-mingw32 ./sdl2_mingw
