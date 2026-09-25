@@ -147,17 +147,47 @@ guest-only auth path exercised (`--no-auth` mode) — a live IDUNA integration t
 through `dwi2_verify`) wasn't run in this sandbox, since it needs a running IDUNA instance with
 the new migration applied; that's real, deployment-time verification, not a code gap.
 
+**Real client (`dw2_client`), folded into this same D2 phase** (founder real-time: "just call it
+D2"; originally scoped as a separate D3 in this doc, folded back in rather than treated as its
+own phase): `apps/client/main.c`, a real interactive SDL2 client speaking `core/protocol.h`'s
+actual wire protocol end to end — connect, auto-queue, pack a grid against a live opponent within
+the server's own time limit (cursor-based placement/rotate/cut, same controls as `apps/local`),
+then watch real-time combat driven by the server's own tick clock, Panic Cut still legal mid-
+combat. Optional IDUNA guest auth (`--iduna-url`, `--guest-file` persists the guest identity
+across relaunches) or a raw `--token`. Real, named simplification (not an oversight, forced by the
+protocol itself): `COMBAT_START`/`TICK` only ever carry hull/armor/cargo/shatter **scalars** for
+each side, never grid detail — a client literally cannot run `dw2_ship_tick` locally at all (it
+needs both ships' full state, and this client never has the opponent's) — so combat renders as
+hull/armor HUD bars for both sides, not a live grid; Panic Cut during combat is addressed by
+placement index (0-9, printed as a legend at `COMBAT_START`) rather than by clicking a cell.
+`--selftest`/`--empty-grid` drive the exact same `try_place`/`try_cut`/`send_ready` code paths as
+real keyboard input, headless (`SDL_VIDEODRIVER=dummy`, same convention as `apps/local`'s own
+`--selftest`) — wired into `scripts/build.sh` as a second, real interactive-client-shaped smoke
+match alongside D2's own `tools/dw2_test_client.c` test (kept, unchanged — it still covers
+protocol edge cases this client's smoke test doesn't re-test: illegal placement, cut rejection,
+pack-deadline force-start, forfeit). One real bug found and fixed live during this same pass, the
+same "verify via the literal bytes/behavior, don't just trust the abstraction" discipline that
+caught D2's own `MATCH_FOUND` payload-size bug: the client's connect handshake initially sent an
+AUTH message unconditionally whenever a token was in hand, which broke a `--no-auth` server (HELLO
+already gets it a `WELCOME`; the now-unexpected trailing AUTH hits `apps/server/main.c`'s own
+`DW2_ERR_BAD_STATE` path, closing the connection) — fixed with a short (500ms) probe: a `WELCOME`
+within it means no-auth already succeeded and AUTH is never sent; no reply means the server is
+silently sitting in `S_NEEDAUTH` (the wire protocol gives no other signal), so AUTH goes out then.
+A second bug (an inverted return-value check treating `recv_msg_blocking`'s `-1`-on-timeout as
+truthy, so a genuinely auth-required server's silence never triggered the AUTH send at all) was
+found live testing the fix against a real `--iduna-url`-configured server and fixed the same pass.
+
 ## Deferred (not yet built)
 
 Everything `DEADWEIGHT/NORTHSTAR.md` already deferred still applies here: the options-pricing/
 insurance/derivatives layer, Merkle-tree cargo-hiding, 2v2/Link Modules, the mobile haptic timing
 table, the full 24-item/16-Ultimate catalog, and the tournament bracket. Additionally, this
-repo's own remaining phased plan (mirroring `DEADWEIGHT/docs/PHASE_D2..D6`, adapted):
+repo's own remaining phased plan (mirroring `DEADWEIGHT/docs/PHASE_D2..D6`, adapted; the original
+D3 "real client shell" line that lived here is now folded into D2 above, not deferred):
 
-- [ ] **D3: a real client shell** replacing the debug renderer — drag/drop-or-cursor packing UX,
-  real art, EOSUI Option C once it exists (`EMILY/docs/EOSUI_NORTHSTAR.md`) for the shop/HUD
-  chrome, speaking `core/protocol.h`'s real wire protocol instead of `tools/dw2_test_client.c`'s
-  scripted test harness.
+- [ ] **Real art + EOSUI Option C chrome** for `dw2_client`, once `EOSUI-NORTH` actually exists
+  (`EMILY/docs/EOSUI_NORTHSTAR.md`) — the client today renders immediate-mode colored rectangles
+  only, same honest limitation `apps/local`'s own debug shell already named.
 - [ ] **D4: a real placeholder bot** (heuristic first, matching `arena_bot_enabled`'s own "no
   local-practice fallback in real matches" convention) so a 1v1 bot pool can exist at all — this
   is when `deadweight_2.bot.play`/`DEADWEIGHT2-BOTS` actually get minted, not before.

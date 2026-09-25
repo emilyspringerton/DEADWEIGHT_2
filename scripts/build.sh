@@ -50,4 +50,32 @@ grep -q "^MATCH_END result=1 reason=0" build/dw2_smoke_a.log || { echo "smoke te
 grep -q "^MATCH_END result=0 reason=0" build/dw2_smoke_b.log || { echo "smoke test FAILED: expected empty grid (B) to lose on hull, see build/dw2_smoke_b.log"; cat build/dw2_smoke_b.log; exit 1; }
 echo "dw2_server smoke test: A (real loadout) beat B (empty grid) on hull, as hand-derived"
 
+echo "== D2: dw2_client (real interactive client) + headless wire-protocol smoke test (ASan+UBSan) =="
+gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all $(pkg-config --cflags sdl2) \
+    core/items.c core/combat.c core/protocol.c core/http.c core/iduna.c apps/client/main.c \
+    $(pkg-config --libs sdl2) -o build/dw2_client
+
+DW2_TEST_PORT2=17801
+./build/dw2_server --port "$DW2_TEST_PORT2" --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
+    > build/dw2_server_d3_smoketest.log 2>&1 &
+DW2_SRV2_PID=$!
+trap 'kill "$DW2_SRV2_PID" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$DW2_TEST_PORT2 " && break; sleep 0.1; done
+
+# --selftest drives the exact same try_place/try_cut/send_ready code paths interactive play uses,
+# just auto-scripted, through the real SDL render path (SDL_VIDEODRIVER=dummy, set internally by
+# the binary itself -- same convention as apps/local/main.c's own --selftest). Same A-beats-empty-
+# grid shape as the D2 smoke test above, but this time proving the real client binary itself (not
+# tools/dw2_test_client.c) can complete a full match end to end.
+./build/dw2_client --port "$DW2_TEST_PORT2" --name ClientA --selftest --timeout-ms 15000 > build/dw2_client_a.log &
+CLIENT2_A_PID=$!
+./build/dw2_client --port "$DW2_TEST_PORT2" --name ClientB --selftest --empty-grid --timeout-ms 15000 > build/dw2_client_b.log &
+CLIENT2_B_PID=$!
+wait "$CLIENT2_A_PID"; wait "$CLIENT2_B_PID"
+kill "$DW2_SRV2_PID" 2>/dev/null || true; trap - EXIT
+
+grep -q "^MATCH_END result=1 reason=0" build/dw2_client_a.log || { echo "D2 client smoke test FAILED: expected dw2_client A (real loadout) to win on hull, see build/dw2_client_a.log"; cat build/dw2_client_a.log; exit 1; }
+grep -q "^MATCH_END result=0 reason=0" build/dw2_client_b.log || { echo "D2 client smoke test FAILED: expected dw2_client B (empty grid) to lose on hull, see build/dw2_client_b.log"; cat build/dw2_client_b.log; exit 1; }
+echo "dw2_client smoke test: a real interactive-client-shaped binary completed a full match over the actual wire protocol"
+
 echo "BUILD CLEAN"
