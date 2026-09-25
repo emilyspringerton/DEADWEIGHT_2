@@ -195,7 +195,7 @@ real time skill check" + "make the games swingy and give comeback mechanics and 
 Read as targeting D2 specifically (assumption named, not assumed silently — see the doc below).
 Full design write-up (the round-structure decision and why, the mini-game's real rules, the
 comeback trigger/effect, the bluff mechanism and what's actually hidden, real V0 vs. deferred
-scope) lives in `docs/COMBAT_REDESIGN.md` (golden-doc registered as `DEADWEIGHT2-COMBAT-NORTH`),
+scope) lives in `docs/COMBAT_REDESIGN.md` (golden-doc registered as `DEADWEIGHT2-COMBAT-REDESIGN`),
 not duplicated here. Short version: combat is now itself broken into `DW2_ROUND_TICKS`-tick
 rounds (`core/round.h`); between rounds, a real-time "Surge Timing" skill check plus a hidden
 Overcharge/Brace call (revealed to both sides only after both are locked in) resolves into a
