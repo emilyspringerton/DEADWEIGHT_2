@@ -164,32 +164,42 @@ jobs:
       - name: Generate Source Construct
         run: bash scripts/generate_construct.sh D2_CONSTRUCT.txt
 
-      - name: Bundle Windows client (collision-safe name)
+      # Founder real-time, 2026-09-25 ("bundle it like deadweight 1 with sdl2 and everything"):
+      # a FLAT zip -- exe + SDL2.dll + PLAY.bat, no folder prefix -- byte-for-byte the same layout
+      # as DEADWEIGHT's own real, live dw_gui_windows.zip (confirmed by downloading and unzip -l'ing
+      # DEADWEIGHT's actual v0.69.0 release asset, not assumed). Earlier version of this job shipped
+      # the exe and SDL2.dll as two separate loose release assets -- a real, found-live gap, not
+      # this pattern: a Windows user needs both files in the same folder to run it at all, so they
+      # belong in one download.
+      - name: Bundle Windows client (flat zip, matching DEADWEIGHT's dw_gui_windows.zip layout)
         run: |
           set -euo pipefail
+          rm -rf pkg/win && mkdir -p pkg/win
+          cp build/dw2_client.exe pkg/win/
+          cp sdl2_mingw/bin/SDL2.dll pkg/win/
+          printf '%s\r\n' "start dw2_client.exe" > pkg/win/PLAY.bat
+          (cd pkg/win && zip -q ../../dw2_client_windows.zip dw2_client.exe SDL2.dll PLAY.bat)
+          # Also a collision-safe-named copy for the workflow-artifact download, matching the
+          # sibling Linux client zips' own D2_Client_${BUILD}.zip convention (the release job below
+          # uses the plain dw2_client_windows.zip directly -- a GitHub Release is already
+          # version-tagged, so it doesn't need the extra build-number suffix the way a same-named
+          # workflow artifact downloaded across multiple runs would).
           BUILD="build_${{ github.run_number }}_${GITHUB_SHA::7}"
-          rm -rf D2_Client_Windows
-          mkdir -p D2_Client_Windows
-          cp build/dw2_client.exe D2_Client_Windows/
-          cp sdl2_mingw/bin/SDL2.dll D2_Client_Windows/
-          printf '%s\r\n' "start dw2_client.exe" > D2_Client_Windows/PLAY.bat
-          cp D2_CONSTRUCT.txt D2_Client_Windows/
-          zip -r "D2_Client_Windows_${BUILD}.zip" D2_Client_Windows
+          cp dw2_client_windows.zip "D2_Client_Windows_${BUILD}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: D2_Builds_Windows_${{ github.run_number }}_${{ github.sha }}
-          path: D2_Client_Windows_*.zip
+          path: |
+            D2_Client_Windows_*.zip
+            D2_CONSTRUCT.txt
           if-no-files-found: error
 
-      # Flat artifact for the release job -- the exe + its DLL, matching D2_Release_Bin's own
-      # unzipped-binaries convention.
       - name: Stage release binaries
         run: |
           set -euo pipefail
           mkdir -p release_bin_windows
-          cp build/dw2_client.exe release_bin_windows/
-          cp sdl2_mingw/bin/SDL2.dll release_bin_windows/
+          cp dw2_client_windows.zip release_bin_windows/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -222,8 +232,7 @@ jobs:
           cp artifacts/D2_Release_Bin_*/dw2_client "out/dw2_client_linux_x86_64"
           cp artifacts/D2_Release_Bin_*/dw2_local "out/dw2_local_linux_x86_64"
           cp artifacts/D2_Release_Bin_*/D2_CONSTRUCT.txt out/
-          cp artifacts/D2_ReleaseWin_Bin_*/dw2_client.exe "out/dw2_client_windows_x86_64.exe"
-          cp artifacts/D2_ReleaseWin_Bin_*/SDL2.dll "out/SDL2.dll"
+          cp artifacts/D2_ReleaseWin_Bin_*/dw2_client_windows.zip out/
           # Create the tag server-side via the release API (--target). A plain `git push origin $TAG` from the runner is
           # rejected ("refusing to allow a GitHub App to create or update workflow ... without `workflows`
           # permission") because the GITHUB_TOKEN treats the workflow file in history as part of the new ref.

@@ -13,3 +13,6 @@
 
 ## 2026-09-25 (2)
 - Fixed a real CI failure in the Windows client job added earlier today: it was missing native `libsdl2-dev` (only installed mingw-w64 + the SDL2-mingw cross tree), so the first real run failed on `scripts/build.sh --windows`'s own native Linux suite before ever reaching the cross-compile step. Verified live: the next CI run went green end to end and the real GitHub Release (v0.3.0) now carries `dw2_client_windows_x86_64.exe` + `SDL2.dll` alongside the three Linux binaries. Apple #20874. (sess-20260923-1030-4a526255)
+
+## 2026-09-25 (3)
+- Windows client re-bundled to match DEADWEIGHT exactly (founder real-time: "bundle it like deadweight 1 with sdl2 and everything"). Downloaded DEADWEIGHT's real, live `dw_gui_windows.zip` and confirmed its exact layout (flat zip, no folder prefix: exe + SDL2.dll + PLAY.bat) rather than assuming. The Windows release asset previously shipped as two separate loose files (`dw2_client_windows_x86_64.exe`, `SDL2.dll`) -- now it's one `dw2_client_windows.zip`, byte-for-byte the same shape as DEADWEIGHT's own. Apple #20881. (sess-20260923-1030-4a526255)

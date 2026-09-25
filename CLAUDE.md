@@ -118,7 +118,8 @@ publishes a real GitHub Release (`dw2_server_linux_x86_64`, `dw2_client_linux_x8
 (a plain `git push origin $TAG` is rejected for workflow-permission reasons, same as DEADWEIGHT).
 **Windows client added (SECTION 551 follow-up, 2026-09-25)**: a `windows` job cross-compiles
 `dw2_client.exe` via mingw (no mbedTLS needed — D2's `http.h` is plain-HTTP-only, unlike
-DEADWEIGHT's own Windows build) and attaches `dw2_client_windows_x86_64.exe` + `SDL2.dll` to every
+DEADWEIGHT's own Windows build) and attaches `dw2_client_windows.zip` (flat: exe + `SDL2.dll` +
+`PLAY.bat`, byte-for-byte the same layout as DEADWEIGHT's own real `dw_gui_windows.zip`) to every
 release. See `docs/WINDOWS_CLIENT_BUILD.md`. `dw2_server`/`dw2_local` and any Android build surface
 stay out of scope — do not add those without a real, separate scoping pass (see the root
 CLAUDE.md's own D2 row).

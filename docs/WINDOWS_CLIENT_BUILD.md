@@ -52,11 +52,19 @@ a live `dw2_server` before treating it as fully equivalent to the Linux build's 
 
 ## Release packaging
 
-The CI `windows` job bundles `dw2_client.exe` + `SDL2.dll` (must ship alongside the exe — SDL2 is
-linked as a mingw import lib, not statically) + a `PLAY.bat` + `D2_CONSTRUCT.txt` into
-`D2_Client_Windows_<build>.zip`, matching DEADWEIGHT's own `dw_gui_windows.zip` packaging
-convention. The flat `dw2_client_windows_x86_64.exe` (plus its `SDL2.dll`) is also attached
-directly to the GitHub Release, alongside the three existing Linux binaries.
+The CI `windows` job builds `dw2_client_windows.zip` — a FLAT zip (`dw2_client.exe`, `SDL2.dll`,
+`PLAY.bat`, no folder prefix) — confirmed byte-for-byte the same layout as DEADWEIGHT's own real,
+live `dw_gui_windows.zip` (downloaded and `unzip -l`'d directly, not assumed). SDL2 must ship
+alongside the exe since it's linked as a mingw import lib, not statically; `PLAY.bat` is a
+double-click launcher. This exact zip is what's attached to the GitHub Release. A separate,
+build-tagged copy (`D2_Client_Windows_<build>.zip`, plus a standalone `D2_CONSTRUCT.txt`) is also
+uploaded as a workflow artifact, matching the sibling Linux client zips' own collision-safe naming
+convention for individual CI-run downloads.
+
+**Found and fixed live, first pass got this wrong**: this job originally attached the bare exe and
+`SDL2.dll` as two separate loose release assets instead of one zip — technically functional if a
+user put both files in the same folder themselves, but not what "bundle it like DEADWEIGHT" meant,
+and a real, worse UX than DEADWEIGHT's own one-download zip. Fixed same day.
 
 Only the client got a Windows build in this pass — `dw2_server`/`dw2_local` stay Linux-only for
 now (the founder's ask was scoped to "windows client"; `dw2_local` needs the same SDL2-mingw tree
