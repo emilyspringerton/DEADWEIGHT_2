@@ -59,6 +59,17 @@ split.
   — with exact, hand-derived numbers, not just "it didn't crash." `scripts/build.sh` also runs
   `dw2_server` and `dw2_client` through full real matches over the actual wire protocol (ASan+UBSan
   clean) as part of every build.
+- **Live in the cluster** (2026-10-09): `dw2_server` is deployed to GKE (`deploy/deadweight2`,
+  `svc/deadweight2:7800` in namespace `emily`) and reachable externally through `tcp-edge`, the
+  monorepo's one shared TCP LoadBalancer rule (`34.63.32.219:7800` → `deadweight2:7800` — see
+  `EMILY/gitops/images/tcp-edge/nginx.conf`, `EMILY/gitops/specs/deadweight2.pod`). Verified live:
+  two real `dw2_test_client` instances queued, packed, and fought a full match end to end through
+  that exact external path, matching the hand-derived smoke-test result. Image:
+  `scripts/build-image.sh` (hermetic Cloud Build, no staged binaries), auto-built on push to
+  `main` via `.github/workflows/deploy.yml` (Workload Identity, no stored key — see
+  `EMILY/gitops/CI_SETUP.md`). Runs `--no-auth` in the cluster for now — a real IDUNA M2M
+  agent/secret for this server was never provisioned (named follow-up, not an oversight; see
+  "What's not built yet" below).
 - CI (`.github/workflows/ci.yml`) generates a Principle 21 CONSTRUCT snapshot on every run and
   bundles it into each client's own zip, plus standalone `.zip`/`.gz` copies, as build artifacts.
   Every green push to `main` also auto-bumps the minor version, tags it, and publishes a real
@@ -76,7 +87,12 @@ general "any combat decision can be a PARENA mod" framework (D5 — cannon progr
 narrow slice of that idiom, not the whole thing). GPG-signed IDUNA app-release publishing is wired
 into CI (same mechanism DEADWEIGHT uses, `app_slug="d2"`) but degrades to a clean no-op until its
 two GitHub Actions secrets are actually provisioned on this repo — see "CI / releases" below and
-`IDUNA/docs/APP_RELEASE_SIGNING.md`. See `NORTHSTAR.md`'s "Deferred" section,
+`IDUNA/docs/APP_RELEASE_SIGNING.md`. No real IDUNA M2M agent exists yet for the live server either
+(it runs `--no-auth` in the cluster) — there's a real naming question to resolve first: a
+`d2`/`D2-SERVER` game identity already exists in IDUNA's own migrations (from the
+DEADWEIGHT_2→D2 rename effort), so wiring real auth here means deciding whether this server is
+that same identity or a genuinely separate `deadweight_2` one, not minting a parallel agent
+blindly. See `NORTHSTAR.md`'s "Deferred" section,
 `docs/COMBAT_REDESIGN.md`'s own "Deferred" section, and `docs/LO_CANNON_PROGRAMMING.md`'s own
 "Deferred" section for the real phased plan.
 
