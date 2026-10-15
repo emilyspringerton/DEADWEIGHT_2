@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "../../core/protocol.h"
 #include "../../core/combat.h"
 #include "../../core/items.h"
@@ -338,8 +339,34 @@ static void render(void) {
     SDL_RenderPresent(R);
 }
 
+/* Startup failures must never just vanish with a closing console (card #613: "it just opens a terminal and
+ * closes"). Every pre-window failure goes through here: it is already in the log (stderr is redirected to
+ * dw2_client.log), and a real message box tells a double-click user what happened and where the log is. */
+static int g_logging = 0;
+static int die(const char *fmt, ...) {
+    char msg[512]; va_list ap; va_start(ap, fmt); vsnprintf(msg, sizeof msg, fmt, ap); va_end(ap);
+    fprintf(stderr, "dw2_client: FATAL: %s\n", msg);
+    if (g_logging) {
+        char box[700]; snprintf(box, sizeof box, "%s\n\nDetails were written to dw2_client.log next to the game.", msg);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "DEADWEIGHT_2", box, NULL);
+    }
+    return 1;
+}
+
 int main(int argc, char **argv) {
-    const char *host = "127.0.0.1"; int port = 7800; char name[DW2_NAME_LEN + 1] = "player";
+    /* Logging, same convention as every other game in this monorepo (REDGARDEN/PAPERCRAFT: the first statements of
+     * main(), before argv parsing or any network call): stdout+stderr go to dw2_client.log in the working dir,
+     * unbuffered. Skipped for --selftest/--console, so CI and terminal runs keep printing to the console. If the
+     * redirect fails (read-only dir) both streams silently stay as they were. */
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--selftest") || !strcmp(argv[i], "--console") || !strcmp(argv[i], "--version")) g_logging = -1;
+    if (g_logging == 0) {
+        FILE *lo = freopen("dw2_client.log", "w", stdout);
+        FILE *le = lo ? freopen("dw2_client.log", "a", stderr) : NULL;
+        if (lo && le) { g_logging = 1; setvbuf(stdout, NULL, _IONBF, 0); setvbuf(stderr, NULL, _IONBF, 0); }
+    }
+    if (g_logging == -1) g_logging = 0;
+    printf("dw2_client starting (argc=%d)\n", argc);
+    const char *host = "dw.okemily.com"; int port = 7800; char name[DW2_NAME_LEN + 1] = "player";
     const char *opt_token = NULL, *opt_iduna_url = NULL, *opt_guest_file = NULL;
     int connect_timeout_ms = 20000, selftest_timeout_ms = 20000;
     for (int i = 1; i < argc; i++) {
@@ -350,11 +377,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--iduna-url") && i + 1 < argc) opt_iduna_url = argv[++i];
         else if (!strcmp(argv[i], "--guest-file") && i + 1 < argc) opt_guest_file = argv[++i];
         else if (!strcmp(argv[i], "--selftest")) selftest_mode = 1;
+        else if (!strcmp(argv[i], "--console")) { /* handled above: keep stdout/stderr on the terminal */ }
         else if (!strcmp(argv[i], "--empty-grid")) selftest_empty = 1;
         else if (!strcmp(argv[i], "--timeout-ms") && i + 1 < argc) selftest_timeout_ms = connect_timeout_ms = atoi(argv[++i]);
         else {
             fprintf(stderr, "usage: dw2_client --host H --port N --name NAME [--token T | --iduna-url URL [--guest-file F]] "
-                             "[--selftest [--empty-grid]] [--timeout-ms N]\n");
+                             "[--selftest [--empty-grid]] [--timeout-ms N] [--console]\n");
             return 2;
         }
     }
@@ -363,7 +391,7 @@ int main(int argc, char **argv) {
     if (opt_token) { snprintf(token, sizeof token, "%s", opt_token); have_token = 1; }
     else if (opt_iduna_url) {
         Dw2Iduna id;
-        if (dwi2_configure(&id, opt_iduna_url, NULL, NULL) != 0) { fprintf(stderr, "bad --iduna-url\n"); return 1; }
+        if (dwi2_configure(&id, opt_iduna_url, NULL, NULL) != 0) return die("Bad --iduna-url: %s (only http:// is supported)", opt_iduna_url);
         char pid[64] = "", secret[128] = "", out_name[64] = ""; int status = 0, loaded = 0, rc;
         if (opt_guest_file) {
             FILE *f = fopen(opt_guest_file, "r");
@@ -372,16 +400,17 @@ int main(int argc, char **argv) {
         rc = loaded ? dwi2_guest_login(&id, pid, secret, token, sizeof token, out_name, sizeof out_name, &status)
                     : dwi2_guest_register(&id, name[0] ? name : NULL, pid, sizeof pid, secret, sizeof secret,
                                            token, sizeof token, out_name, sizeof out_name, &status);
-        if (rc != 0) { fprintf(stderr, "guest %s failed (rc=%d status=%d)\n", loaded ? "login" : "register", rc, status); return 1; }
+        if (rc != 0) return die("IDUNA guest %s failed (rc=%d status=%d) at %s", loaded ? "login" : "register", rc, status, opt_iduna_url);
         if (out_name[0]) snprintf(name, sizeof name, "%.16s", out_name); /* DW2_NAME_LEN cap, matches apps/server/main.c's own convention */
         if (opt_guest_file && !loaded) { FILE *f = fopen(opt_guest_file, "w"); if (f) { fprintf(f, "%s %s\n", pid, secret); fclose(f); } }
         printf("guest %s: player_id=%s name=%s\n", loaded ? "login" : "register", pid, name);
         have_token = 1;
     }
 
-    if (dw2_net_init() != 0) { fprintf(stderr, "net init failed\n"); return 1; }
+    if (dw2_net_init() != 0) return die("Network init failed");
+    printf("connecting to %s:%d as %s\n", host, port, name);
     sock = dw2_connect(host, port);
-    if (sock == DW2_BAD_SOCK) { fprintf(stderr, "connect to %s:%d failed\n", host, port); return 1; }
+    if (sock == DW2_BAD_SOCK) return die("Could not connect to %s:%d. Check your internet connection, or run with --host/--port.", host, port);
 
     Dw2WireMsg m; memset(&m, 0, sizeof m);
     m.type = DW2_C_HELLO; m.u.hello.proto = DW2_PROTO_VERSION; m.u.hello.kind = DW2_KIND_HUMAN;
@@ -409,14 +438,13 @@ int main(int argc, char **argv) {
     } else if (!have_token) {
         got = (recv_msg_blocking(&reply, connect_timeout_ms, 0) == 1);
     }
-    if (!got) { fprintf(stderr, "no response from server (timed out)\n"); return 1; }
+    if (!got) return die("No response from %s:%d (timed out).", host, port);
     if (reply.type == DW2_S_WELCOME) {
         printf("WELCOME session=%u flags=%u\n", reply.u.welcome.session_id, reply.u.welcome.flags);
     } else if (reply.type == DW2_S_ERROR) {
-        fprintf(stderr, "server rejected connection: error code %u%s\n", reply.u.error.code,
-                have_token ? "" : " (does this server require --token/--iduna-url?)");
-        return 1;
-    } else { fprintf(stderr, "unexpected message type %d during handshake\n", reply.type); return 1; }
+        return die("Server rejected the connection: error code %u%s", reply.u.error.code,
+                   have_token ? "" : " (does this server require --token/--iduna-url?)");
+    } else return die("Unexpected message type %d during handshake", reply.type);
 
     memset(&m, 0, sizeof m); m.type = DW2_C_QUEUE; send_msg(&m);
     state = CS_QUEUED;
@@ -424,12 +452,12 @@ int main(int argc, char **argv) {
 
     if (selftest_mode) SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
     SDL_SetMainReady();
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) return die("SDL_Init failed: %s", SDL_GetError());
     SDL_Window *win = SDL_CreateWindow("DEADWEIGHT_2", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIN_W, WIN_H, SDL_WINDOW_SHOWN);
-    if (!win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return 1; }
+    if (!win) return die("SDL_CreateWindow failed: %s", SDL_GetError());
     R = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (!R) R = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-    if (!R) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
+    if (!R) return die("SDL_CreateRenderer failed: %s", SDL_GetError());
 
     printf("DEADWEIGHT_2 -- connected as %s, queued.\n", name);
     printf("  packing: 1-7 select | arrows/WASD cursor | R rotate | ENTER place | C panic cut | F ready\n");

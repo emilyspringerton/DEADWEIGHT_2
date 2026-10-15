@@ -177,7 +177,9 @@ jobs:
           rm -rf pkg/win && mkdir -p pkg/win
           cp build/dw2_client.exe pkg/win/
           cp sdl2_mingw/bin/SDL2.dll pkg/win/
-          printf '%s\r\n' "start dw2_client.exe" > pkg/win/PLAY.bat
+          # cd into the folder first (so dw2_client.log lands next to the exe), run in-console, and pause on a
+          # non-zero exit so a failure is never a console that flashes and closes (card #613).
+          printf '%s\r\n' '@echo off' 'cd /d "%~dp0"' 'dw2_client.exe %*' 'if errorlevel 1 (' '  echo.' '  echo DEADWEIGHT_2 exited with an error. See dw2_client.log in this folder.' '  pause' ')' > pkg/win/PLAY.bat
           (cd pkg/win && zip -q ../../dw2_client_windows.zip dw2_client.exe SDL2.dll PLAY.bat)
           # Also a collision-safe-named copy for the workflow-artifact download, matching the
           # sibling Linux client zips' own D2_Client_${BUILD}.zip convention (the release job below
