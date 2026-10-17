@@ -43,7 +43,7 @@ int dw2_encode(const Dw2WireMsg *m, uint8_t *buf, size_t cap) {
     case DW2_S_QUEUED: w16(&w, m->u.queued.waiting); break;
     case DW2_S_MATCH_FOUND:
         w32(&w, m->u.match_found.match_id); w32(&w, m->u.match_found.seed); w8(&w, m->u.match_found.seat);
-        wname(&w, m->u.match_found.opp_name); w8(&w, m->u.match_found.opp_kind); w16(&w, m->u.match_found.pack_ms);
+        wname(&w, m->u.match_found.opp_name); w8(&w, m->u.match_found.opp_kind); w32(&w, m->u.match_found.pack_ms);
         break;
     case DW2_S_PLACE_ACK: w8(&w, m->u.place_ack.placement_idx); break;
     case DW2_S_PLACE_REJECT: w8(&w, m->u.place_reject.reason); break;
@@ -93,7 +93,7 @@ static int payload_size(uint8_t t) {
     case DW2_C_PLACE: return 4; case DW2_C_PANIC_CUT: return 1;
     case DW2_C_PING: case DW2_S_PONG: return 4;
     case DW2_S_WELCOME: return 5; case DW2_S_QUEUED: return 2;
-    case DW2_S_MATCH_FOUND: return 28; case DW2_S_PLACE_ACK: return 1; case DW2_S_PLACE_REJECT: return 1;
+    case DW2_S_MATCH_FOUND: return 30; case DW2_S_PLACE_ACK: return 1; case DW2_S_PLACE_REJECT: return 1;
     case DW2_S_CUT_ACK: return 1; case DW2_S_CUT_REJECT: return 1;
     case DW2_S_COMBAT_START: return 10; case DW2_S_TICK: return 9; case DW2_S_MATCH_END: return 7;
     case DW2_S_ROUND_BREAK: return 6; case DW2_C_ROUND_CALL: return 1; case DW2_S_ROUND_RESULT: return 6;
@@ -141,7 +141,7 @@ int dw2_decode(const uint8_t *buf, size_t len, Dw2WireMsg *out, size_t *consumed
     case DW2_S_MATCH_FOUND:
         out->u.match_found.match_id = r32(&r); out->u.match_found.seed = r32(&r); out->u.match_found.seat = (uint8_t)r8(&r);
         rname(&r, out->u.match_found.opp_name); out->u.match_found.opp_kind = (uint8_t)r8(&r);
-        out->u.match_found.pack_ms = (uint16_t)r16(&r);
+        out->u.match_found.pack_ms = r32(&r);
         break;
     case DW2_S_PLACE_ACK: out->u.place_ack.placement_idx = (uint8_t)r8(&r); break;
     case DW2_S_PLACE_REJECT: out->u.place_reject.reason = (uint8_t)r8(&r); break;

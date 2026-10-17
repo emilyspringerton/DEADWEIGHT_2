@@ -2,6 +2,8 @@
 #include "cannon.h"
 #include <string.h>
 
+static float dw2_ore_armor(const Dw2Ship *s);
+
 Dw2WeaponStats dw2_weapon_stats(int item_id) {
     Dw2WeaponStats w = { 0.0f, 0.0f, 0 };
     switch (item_id) {
@@ -70,6 +72,10 @@ int dw2_ship_panic_cut(Dw2Ship *s, int placement_idx) {
      * recompute-from-scratch pass, so a mid-fight cut has an immediate, observable second effect
      * beyond severing/rerouting energy. */
     for (int i = 0; i < n; i++) if (cells[i].role == DW2_ROLE_DEAD) { s->armor += DW2_ARMOR_PER_DEAD_CELL; s->armor_max += DW2_ARMOR_PER_DEAD_CELL; }
+    /* a cut piece is no longer intact: cutting Aether Ore takes back the armor the Bulwark cells touching it were worth */
+    float ore = dw2_ore_armor(s), d = ore - s->ore_armor;
+    s->ore_armor = ore;
+    if (d != 0.0f) { s->armor += d; if (s->armor < 0.0f) s->armor = 0.0f; s->armor_max += d; if (s->armor_max < 0.0f) s->armor_max = 0.0f; }
     return 1;
 }
 
@@ -87,90 +93,162 @@ void dw2_ship_start_combat(Dw2Ship *s) {
             else if (role == DW2_ROLE_DEAD) s->armor += DW2_ARMOR_PER_DEAD_CELL;
         }
     }
+    s->ore_armor = dw2_ore_armor(s);
+    s->armor += s->ore_armor;
     s->armor_max = s->armor;
+    for (int i = 0; i < DW2_GRID_CELLS; i++) { s->cell_q[i] = 0.0f; s->cell_q2[i] = 0.0f; s->gate_open[i] = 0; }
+    for (int p = 0; p < s->placement_n; p++) {
+        const Dw2Placement *pl = &s->placements[p];
+        if (pl->item_id == DW2_ITEM_BATTERY && pl->cell_n > 0 && pl->cells[0].in_bounds)
+            s->cell_q[dw2_cell(pl->cells[0].row, pl->cells[0].col)] = DW2_BAT_START;
+    }
 }
 
 typedef struct { int8_t role; uint8_t port; int8_t placement_idx; } Dw2NetCell;
 
-static int dw2_path_index(const int *path, int path_len, int cell) {
-    for (int i = 0; i < path_len; i++) if (path[i] == cell) return i;
-    return -1;
-}
-
-static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir, float gain,
-                      int *path, int *path_len, int *activated, dw2_mask *loop_hits);
-
-/* Forwards energy out of `cell` along every direction bit set in `out_ports`, bounds-checked so a
- * grid-edge cell never wraps into the next/previous row (dw2_cell(row, col+-1) is only valid math
- * when col+-1 is still inside [0, DW2_GRID_W)). */
-static void dw2_flow_dir(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t out_ports, float gain,
-                          int *path, int *path_len, int *activated, dw2_mask *loop_hits) {
-    int row = cell / DW2_GRID_W, col = cell % DW2_GRID_W;
-    if ((out_ports & DW2_PORT_N) && row - 1 >= 0)
-        dw2_flow(s, net, dw2_cell(row - 1, col), DW2_PORT_S, gain, path, path_len, activated, loop_hits);
-    if ((out_ports & DW2_PORT_E) && col + 1 < DW2_GRID_W)
-        dw2_flow(s, net, dw2_cell(row, col + 1), DW2_PORT_W, gain, path, path_len, activated, loop_hits);
-    if ((out_ports & DW2_PORT_S) && row + 1 < DW2_GRID_H)
-        dw2_flow(s, net, dw2_cell(row + 1, col), DW2_PORT_N, gain, path, path_len, activated, loop_hits);
-    if ((out_ports & DW2_PORT_W) && col - 1 >= 0)
-        dw2_flow(s, net, dw2_cell(row, col - 1), DW2_PORT_E, gain, path, path_len, activated, loop_hits);
-}
-
-static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir, float gain,
-                      int *path, int *path_len, int *activated, dw2_mask *loop_hits) {
-    if (dw2_bit(cell) & s->burned) return;
-    Dw2NetCell *nc = &net[cell];
-    if (nc->role < 0) return;                 /* empty cell */
-    if (!(nc->port & incoming_dir)) return;    /* not wired to accept from this direction */
-
-    int on_path_idx = dw2_path_index(path, *path_len, cell);
-    if (on_path_idx >= 0) {
-        /* Closed loop: path[on_path_idx .. path_len-1] plus this cell form the loop
-         * (SPEC_REVIEW.md's own Back-EMF meltdown, the sole failure mode for bad wiring). */
-        dw2_mask loop_mask = 0;
-        for (int i = on_path_idx; i < *path_len; i++) loop_mask |= dw2_bit(path[i]);
-        *loop_hits |= loop_mask;
-        return;
+/* the placement that owns each cell, -1 where nothing is */
+static void dw2_owner_map(const Dw2Ship *s, int8_t *owner) {
+    for (int i = 0; i < DW2_GRID_CELLS; i++) owner[i] = -1;
+    for (int p = 0; p < s->placement_n; p++) {
+        const Dw2Placement *pl = &s->placements[p];
+        if (pl->item_id < 0) continue;
+        for (int c = 0; c < pl->cell_n; c++)
+            if (pl->cells[c].in_bounds) owner[dw2_cell(pl->cells[c].row, pl->cells[c].col)] = (int8_t)p;
     }
-    if (activated[cell]) return; /* many-to-one: SPEC_REVIEW.md §3 -- inert, not a merge/conflict */
-    activated[cell] = 1;
-    path[(*path_len)++] = cell;
+}
 
+/* Does the cell touch (share an edge with) a cell of an intact, uncut placement of `item_id`? Position is rules: a Titanium Beam
+ * boosts the weapons touching it, Aether Ore the defenses, and cutting either one loses that. */
+static int dw2_cell_touches(const Dw2Ship *s, const int8_t *owner, int cell, int item_id) {
+    int row = cell / DW2_GRID_W, col = cell % DW2_GRID_W;
+    int nb[4], n = 0;
+    if (row > 0) nb[n++] = cell - DW2_GRID_W;
+    if (col + 1 < DW2_GRID_W) nb[n++] = cell + 1;
+    if (row + 1 < DW2_GRID_H) nb[n++] = cell + DW2_GRID_W;
+    if (col > 0) nb[n++] = cell - 1;
+    for (int i = 0; i < n; i++) {
+        int o = owner[nb[i]];
+        if (o >= 0 && o != owner[cell] && s->placements[o].item_id == item_id && !s->placements[o].cut) return 1;
+    }
+    return 0;
+}
+
+static int dw2_placement_touches(const Dw2Ship *s, const int8_t *owner, int p, int item_id) {
+    const Dw2Placement *pl = &s->placements[p];
+    for (int c = 0; c < pl->cell_n; c++)
+        if (pl->cells[c].in_bounds && dw2_cell_touches(s, owner, dw2_cell(pl->cells[c].row, pl->cells[c].col), item_id)) return 1;
+    return 0;
+}
+
+/* the armor the Bulwark cells that touch intact Aether Ore are worth on top of their own */
+static float dw2_ore_armor(const Dw2Ship *s) {
+    int8_t owner[DW2_GRID_CELLS];
+    dw2_owner_map(s, owner);
+    float a = 0.0f;
+    for (int p = 0; p < s->placement_n; p++) {
+        const Dw2Placement *pl = &s->placements[p];
+        if (pl->item_id < 0) continue;
+        for (int c = 0; c < pl->cell_n; c++)
+            if (pl->cells[c].in_bounds && pl->cells[c].role == DW2_ROLE_ARMOR &&
+                dw2_cell_touches(s, owner, dw2_cell(pl->cells[c].row, pl->cells[c].col), DW2_ITEM_AETHER_ORE)) a += DW2_ORE_ARMOR_BONUS;
+    }
+    return a;
+}
+
+float dw2_resistor_factor(int item_id) {
+    return item_id == DW2_ITEM_RESISTOR_1 ? 0.75f : item_id == DW2_ITEM_RESISTOR_2 ? 0.5f : item_id == DW2_ITEM_RESISTOR_4 ? 0.25f : 1.0f;
+}
+
+uint8_t dw2_rotated_port(uint8_t port, int rotation) {
+    rotation = ((rotation % 4) + 4) % 4;
+    for (int r = 0; r < rotation; r++) port = dw2_rotate_port_cw(port);
+    return port;
+}
+
+static int dw2_popcount4(uint8_t m) { return ((m >> 3) & 1) + ((m >> 2) & 1) + ((m >> 1) & 1) + (m & 1); }
+
+/* One second of power moving through a ship. Power is in watts (a Generator makes 10). It leaves a part by every open port but the one it
+ * came in by, DIVIDED equally between them; every route that reaches a cell adds its share, so two feeds into one wire add up. A stateful part
+ * (Capacitor, Battery, Delayer) ends the walk: what reaches it is banked and shows up as its output on a LATER tick, which is what makes timing
+ * a skill. Reaching a cell already on the current route is a closed loop (Back-EMF). */
+typedef struct {
+    Dw2Ship *s;
+    Dw2NetCell net[DW2_GRID_CELLS];
+    float pin[DW2_GRID_CELLS];        /* power delivered to the cell this tick */
+    float absorb[DW2_GRID_CELLS];     /* ... of which a stateful part banks */
+    float gate_in[DW2_GRID_CELLS];    /* ... or a Transistor's gate sees */
+    int path[DW2_GRID_CELLS + 4];
+    int path_len;
+    int budget;
+    dw2_mask loop_hits;
+} Dw2Flow;
+
+static void dw2_deliver(Dw2Flow *f, int cell, uint8_t incoming, float power);
+
+static void dw2_forward(Dw2Flow *f, int cell, uint8_t out_ports, float power) {
+    int n = dw2_popcount4(out_ports);
+    if (n == 0) return;
+    float share = power / (float)n;
+    int row = cell / DW2_GRID_W, col = cell % DW2_GRID_W;
+    if ((out_ports & DW2_PORT_N) && row - 1 >= 0) dw2_deliver(f, dw2_cell(row - 1, col), DW2_PORT_S, share);
+    if ((out_ports & DW2_PORT_E) && col + 1 < DW2_GRID_W) dw2_deliver(f, dw2_cell(row, col + 1), DW2_PORT_W, share);
+    if ((out_ports & DW2_PORT_S) && row + 1 < DW2_GRID_H) dw2_deliver(f, dw2_cell(row + 1, col), DW2_PORT_N, share);
+    if ((out_ports & DW2_PORT_W) && col - 1 >= 0) dw2_deliver(f, dw2_cell(row, col - 1), DW2_PORT_E, share);
+}
+
+static void dw2_deliver(Dw2Flow *f, int cell, uint8_t incoming, float power) {
+    Dw2Ship *s = f->s;
+    if (power < 0.001f) return;
+    if (dw2_bit(cell) & s->burned) return;
+    Dw2NetCell *nc = &f->net[cell];
+    if (nc->role < 0) return;                 /* empty cell */
+    if (!(nc->port & incoming)) return;        /* not wired to accept from this direction */
+    int rot = s->placements[nc->placement_idx].rotation;
+    uint8_t in_port = dw2_rotated_port(DW2_PORT_W, rot), gate_port = dw2_rotated_port(DW2_PORT_N, rot);
+    if ((nc->role == DW2_ROLE_CAPACITOR || nc->role == DW2_ROLE_BATTERY || nc->role == DW2_ROLE_DELAYER) && incoming != in_port) return;
+    if (nc->role == DW2_ROLE_TRANSISTOR && incoming != in_port && incoming != gate_port) return;
+    for (int i = 0; i < f->path_len; i++) {
+        if (f->path[i] == cell) {
+            /* Closed loop: path[i .. path_len-1] plus this cell (SPEC_REVIEW.md's Back-EMF meltdown, the failure mode for bad wiring). */
+            for (int k = i; k < f->path_len; k++) f->loop_hits |= dw2_bit(f->path[k]);
+            return;
+        }
+    }
+    if (f->budget <= 0) return;
+    f->budget--;
+    if (power > DW2_POWER_MAX) power = DW2_POWER_MAX;
+    f->pin[cell] += power;
+    f->path[f->path_len++] = cell;
+    uint8_t out = nc->port & (uint8_t)~incoming;   /* `incoming` is this cell's OWN port bit, not the sender's */
     switch (nc->role) {
         case DW2_ROLE_WEAPON:
-            s->weapon_charge[nc->placement_idx] += DW2_GENERATOR_OUTPUT * gain;
+            s->weapon_charge[nc->placement_idx] += power;
             break;
-        case DW2_ROLE_AMPLIFIER:   /* a wire with gain */
+        case DW2_ROLE_AMPLIFIER:
+            power *= DW2_AMPLIFIER_GAIN;
+            dw2_forward(f, cell, out, power);
+            break;
         case DW2_ROLE_CONDUCTOR:
-        case DW2_ROLE_SPLITTER: {
-            /* Forward out every active port except the one that just received (`incoming_dir` is
-             * this cell's OWN port bit, not the sender's) -- excluding anything else would send
-             * energy right back out the port it just arrived on, straight back to the sender. */
-            uint8_t out_ports = nc->port & (uint8_t)~incoming_dir;
-            if (nc->role == DW2_ROLE_AMPLIFIER) gain *= DW2_AMPLIFIER_GAIN;
-            dw2_flow_dir(s, net, cell, out_ports, gain, path, path_len, activated, loop_hits);
+        case DW2_ROLE_SPLITTER:
+            dw2_forward(f, cell, out, power);
             break;
-        }
-        case DW2_ROLE_MENDER:
-        case DW2_ROLE_AEGIS:
-            break; /* a sink: being fed is the whole job; dw2_ship_tick reads `activated` for them */
-        case DW2_ROLE_ARMOR:
-        case DW2_ROLE_NONE:
-        case DW2_ROLE_DEAD:
-        case DW2_ROLE_GENERATOR:
+        case DW2_ROLE_RESISTOR:
+            power *= dw2_resistor_factor(s->placements[nc->placement_idx].item_id);
+            dw2_forward(f, cell, out, power);
+            break;
+        case DW2_ROLE_CAPACITOR:
+        case DW2_ROLE_BATTERY:
+        case DW2_ROLE_DELAYER:
+            f->absorb[cell] += power;
+            break;
+        case DW2_ROLE_TRANSISTOR:
+            if (incoming == gate_port) f->gate_in[cell] += power;
+            else if (s->gate_open[cell]) dw2_forward(f, cell, (uint8_t)(nc->port & ~in_port & ~gate_port), power);
+            break;
         default:
-            break; /* sink / inert for routing purposes */
+            break; /* Mender / Aegis (read from pin), Armor, Dead, Generator, cargo: a sink */
     }
-    (*path_len)--;
-}
-
-static void dw2_flow_from_generator(Dw2Ship *s, Dw2NetCell *net, int gcell, int *activated, dw2_mask *loop_hits) {
-    if (dw2_bit(gcell) & s->burned) return;
-    int path[DW2_GRID_CELLS + 4];
-    int path_len = 0;
-    path[path_len++] = gcell;
-    activated[gcell] = 1;
-    dw2_flow_dir(s, net, gcell, net[gcell].port, 1.0f, path, &path_len, activated, loop_hits);
+    f->path_len--;
 }
 
 static void dw2_ship_apply_damage(Dw2Ship *s, float dmg) {
@@ -197,8 +275,10 @@ static void dw2_ship_apply_pierce(Dw2Ship *s, float dmg) {
  * closed loop triggers meltdown," not "arbitrarily many independent loops are perfectly
  * accounted"), not an oversight -- revisit only if playtesting finds multi-loop builds common. */
 void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
-    Dw2NetCell net[DW2_GRID_CELLS];
-    for (int i = 0; i < DW2_GRID_CELLS; i++) { net[i].role = -1; net[i].port = 0; net[i].placement_idx = -1; }
+    Dw2Flow f;
+    memset(&f, 0, sizeof f);
+    f.s = self; f.budget = DW2_FLOW_BUDGET;
+    for (int i = 0; i < DW2_GRID_CELLS; i++) { f.net[i].role = -1; f.net[i].port = 0; f.net[i].placement_idx = -1; }
     for (int p = 0; p < self->placement_n; p++) {
         Dw2Placement *pl = &self->placements[p];
         if (pl->item_id < 0) continue;
@@ -206,18 +286,54 @@ void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
             Dw2PlacedCell *pc = &pl->cells[c];
             if (!pc->in_bounds) continue;
             int idx = dw2_cell(pc->row, pc->col);
-            net[idx].role = (int8_t)pc->role;
-            net[idx].port = pc->port;
-            net[idx].placement_idx = (int8_t)p;
+            f.net[idx].role = (int8_t)pc->role;
+            f.net[idx].port = pc->port;
+            f.net[idx].placement_idx = (int8_t)p;
         }
     }
 
-    int activated[DW2_GRID_CELLS];
-    memset(activated, 0, sizeof activated);
-    dw2_mask loop_hits = 0;
-    for (int i = 0; i < DW2_GRID_CELLS; i++)
-        if (net[i].role == DW2_ROLE_GENERATOR && !(dw2_bit(i) & self->burned))
-            dw2_flow_from_generator(self, net, i, activated, &loop_hits);
+    /* the sources, in cell order: a Generator makes 10; a Battery gives up to 15 of what it holds; a full Capacitor lets go of everything;
+     * a Delayer lets go of what it was fed two ticks ago. A part that stores power puts it out of its output side. */
+    for (int i = 0; i < DW2_GRID_CELLS; i++) {
+        if (dw2_bit(i) & self->burned) continue;
+        int8_t role = f.net[i].role;
+        uint8_t ports = f.net[i].port;
+        uint8_t out = f.net[i].placement_idx >= 0 ? dw2_rotated_port(DW2_PORT_E, self->placements[f.net[i].placement_idx].rotation) : 0;
+        float power = 0.0f;
+        if (role == DW2_ROLE_GENERATOR) {
+            f.path[0] = i; f.path_len = 1; f.pin[i] = DW2_GENERATOR_OUTPUT;
+            dw2_forward(&f, i, ports, DW2_GENERATOR_OUTPUT);
+            f.path_len = 0;
+            continue;
+        } else if (role == DW2_ROLE_BATTERY) {
+            power = self->cell_q[i] < DW2_BAT_RATE ? self->cell_q[i] : DW2_BAT_RATE;
+            self->cell_q[i] -= power;
+        } else if (role == DW2_ROLE_CAPACITOR) {
+            if (self->cell_q[i] >= DW2_CAP_FULL) { power = self->cell_q[i]; self->cell_q[i] = 0.0f; }
+        } else if (role == DW2_ROLE_DELAYER) {
+            power = self->cell_q2[i];
+            self->cell_q2[i] = self->cell_q[i];
+            self->cell_q[i] = 0.0f;
+        }
+        if (power >= 0.001f) { f.path_len = 0; dw2_forward(&f, i, out, power); }
+    }
+    dw2_mask loop_hits = f.loop_hits;
+
+    /* what the stateful parts were fed this tick is banked (it will matter on a later one) */
+    for (int i = 0; i < DW2_GRID_CELLS; i++) {
+        int8_t role = f.net[i].role;
+        if (role == DW2_ROLE_BATTERY) {
+            self->cell_q[i] += f.absorb[i];
+            if (self->cell_q[i] > DW2_BAT_MAX) self->cell_q[i] = DW2_BAT_MAX;
+        } else if (role == DW2_ROLE_CAPACITOR) {
+            self->cell_q[i] += f.absorb[i];
+            if (self->cell_q[i] > DW2_CAP_MAX) self->cell_q[i] = DW2_CAP_MAX;
+        } else if (role == DW2_ROLE_DELAYER) {
+            self->cell_q[i] += f.absorb[i];
+        } else if (role == DW2_ROLE_TRANSISTOR) {
+            self->gate_open[i] = f.gate_in[i] >= DW2_GATE_MIN;
+        }
+    }
 
     if (loop_hits) {
         if (!self->loop.active || self->loop.cells != loop_hits) {
@@ -235,42 +351,38 @@ void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
         self->loop.active = 0;
     }
 
+    int8_t owner[DW2_GRID_CELLS];
+    dw2_owner_map(self, owner);
     for (int p = 0; p < self->placement_n; p++) {
         if (self->placements[p].item_id < 0) continue;
         Dw2WeaponStats ws = dw2_weapon_stats(self->placements[p].item_id);
         if (ws.threshold <= 0.0f) continue;
-        /* a weapon fed more than its threshold in one second (an Amplifier ahead of a Pulse Laser) shoots more than once; with the
-         * Railgun on a plain wire this loop runs at most once, exactly as before */
+        float boost = dw2_placement_touches(self, owner, p, DW2_ITEM_TITANIUM_BEAM) ? DW2_BEAM_BOOST : 1.0f;
+        /* a weapon fed more than its threshold in one second shoots more than once */
         while (self->weapon_charge[p] >= ws.threshold) {
-            float shot_dmg = ws.damage * self->dmg_mult;
-            /* "Cannon programming" (EMILY/BACKLOG.md SECTION 549, docs/LO_CANNON_PROGRAMMING.md):
-             * the fire/hold call is a real, compiled LO program (core/cannon.h), not a hardcoded
-             * "always fire" rule -- packs the same `behind` signal core/round.h's own comeback
-             * grading already uses, plus whether this shot alone would finish the enemy's hull, into
-             * cannon_decision's real 4-state input. The shipped decision program is FIRE in all 4
-             * states, so this is byte-identical to the pre-cannon-programming behavior; a HOLD
-             * leaves weapon_charge untouched, so it's simply re-evaluated fresh next tick. */
+            float shot_dmg = ws.damage * self->dmg_mult * boost;
+            /* "Cannon programming" (EMILY/BACKLOG.md SECTION 549, docs/LO_CANNON_PROGRAMMING.md): the fire/hold call is a real, compiled LO
+             * program (core/cannon.h). The shipped decision program is FIRE in all 4 states; a HOLD leaves weapon_charge untouched. */
             int self_behind = self->hull_pct < enemy->hull_pct;
             int shot_is_overkill = enemy->hull_pct <= shot_dmg;
             if (dw2_cannon_decide(self_behind, shot_is_overkill) == DW2_CANNON_HOLD) break;
             self->weapon_charge[p] -= ws.threshold;
-            /* dmg_mult (core/round.h): a graded Overcharge round-break call scales this ship's own
-             * outgoing damage for the current round; 1.0 (the default) is byte-identical to pre-
-             * round-break behavior. */
             if (ws.pierce) dw2_ship_apply_pierce(enemy, shot_dmg);
             else dw2_ship_apply_damage(enemy, shot_dmg);
         }
     }
 
-    /* the support parts: a fed Mender mends the hull, a fed Aegis Emitter refills armor up to what the ship started with */
+    /* the support parts: a Mender mends 2 hull per 10 W it is fed, an Aegis Emitter refills 3 armor per 10 W (x1.5 touching Aether Ore) */
     if (self->hull_pct > 0.0f) {
         for (int i = 0; i < DW2_GRID_CELLS; i++) {
-            if (!activated[i] || (dw2_bit(i) & self->burned)) continue;
-            if (net[i].role == DW2_ROLE_MENDER) {
-                self->hull_pct += DW2_MENDER_HEAL;
+            if (!(f.pin[i] > 0.0f) || (dw2_bit(i) & self->burned)) continue;
+            if (f.net[i].role == DW2_ROLE_MENDER) {
+                self->hull_pct += DW2_MENDER_HEAL * (f.pin[i] / DW2_GENERATOR_OUTPUT);
                 if (self->hull_pct > 100.0f) self->hull_pct = 100.0f;
-            } else if (net[i].role == DW2_ROLE_AEGIS && self->armor < self->armor_max) {
-                self->armor += DW2_AEGIS_RECHARGE;
+            } else if (f.net[i].role == DW2_ROLE_AEGIS && self->armor < self->armor_max) {
+                float r = DW2_AEGIS_RECHARGE * (f.pin[i] / DW2_GENERATOR_OUTPUT);
+                if (dw2_cell_touches(self, owner, i, DW2_ITEM_AETHER_ORE)) r *= DW2_ORE_AEGIS_BOOST;
+                self->armor += r;
                 if (self->armor > self->armor_max) self->armor = self->armor_max;
             }
         }

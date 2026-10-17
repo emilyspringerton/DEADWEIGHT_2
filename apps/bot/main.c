@@ -124,8 +124,8 @@ static void on_msg(Bot *b, const Dw2WireMsg *m, uint64_t now) {
     case DW2_S_TICK: b->hull_you = m->u.tick.hull_you; b->hull_opp = m->u.tick.hull_opp; break;
     case DW2_S_ROUND_BREAK: {
         int behind = m->u.round_break.behind;
-        int lead = b->hull_you - b->hull_opp;
-        int over_pct = behind ? 85 : lead >= 30 ? 25 : 60;
+        /* behind: a win pays 60% more, so press the risky call; ahead: a win pays only 40% and a miss costs 60% more, so mostly brace */
+        int over_pct = behind == 1 ? 85 : behind == 2 ? 20 : 60;
         b->call_val = bi(b, 100) < over_pct ? DW2_CALL_OVERCHARGE : DW2_CALL_BRACE;
         int at = (int)m->u.round_break.target_ms + jitter(b, b->skill);
         if (at < 30) at = 30;

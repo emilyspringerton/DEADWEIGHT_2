@@ -23,14 +23,31 @@
 #define DW2_ARMOR_PER_ARMOR_ITEM   20.0f  /* Bulwark Plate's own flat contribution */
 #define DW2_ARMOR_PER_DEAD_CELL     8.0f  /* "waste becomes armor" (NORTHSTAR.md) */
 #define DW2_MATCH_TIMEOUT_TICKS      30   /* "a 30-second combat limit" -- 1 tick = 1 second */
-#define DW2_AMPLIFIER_GAIN         1.5f   /* energy passing through an Amplifier is multiplied by this */
-#define DW2_MENDER_HEAL            2.0f   /* hull% per tick, per fed Mender (never past 100) */
-#define DW2_AEGIS_RECHARGE         3.0f   /* armor per tick, per fed Aegis Emitter (never past the armor the ship started with) */
+#define DW2_AMPLIFIER_GAIN         1.5f   /* power passing through an Amplifier is multiplied by this */
+#define DW2_GENERATOR_VOLTS        5.0f   /* a Generator is 5 V x 2 A = 10 W; an Amplifier raises the volts, a Resistor cuts the amps */
+#define DW2_CAP_FULL              30.0f   /* a Capacitor releases everything it holds in one tick once it holds this much */
+#define DW2_CAP_MAX               60.0f
+#define DW2_BAT_START             45.0f   /* a Battery goes into the fight half charged ... */
+#define DW2_BAT_MAX               90.0f
+#define DW2_BAT_RATE              15.0f   /* ... and gives up to this much a tick */
+#define DW2_GATE_MIN               2.0f   /* a Transistor's gate must have been fed this much on the previous tick for the channel to conduct */
+#define DW2_POWER_MAX            120.0f   /* no single feed carries more than this (stops a ring of Amplifiers running away) */
+#define DW2_FLOW_BUDGET           4096    /* hand-offs one tick may make; the walk is deterministic, so every implementation stops at the same place */
+#define DW2_BEAM_BOOST             1.5f   /* weapons touching an intact Titanium Beam deal this much more */
+#define DW2_ORE_ARMOR_BONUS       10.0f   /* each Bulwark cell touching intact Aether Ore: +10 armor ... */
+#define DW2_ORE_AEGIS_BOOST        1.5f   /* ... and an Aegis Emitter touching it recharges this much faster */
+#define DW2_MENDER_HEAL            2.0f   /* hull% per tick, per 10 W fed to a Mender (never past 100) */
+#define DW2_AEGIS_RECHARGE         3.0f   /* armor per tick, per 10 W fed to an Aegis Emitter (never past the armor the ship started with) */
 
 /* What a weapon item fires: it fires when its charge reaches `threshold` (it gains 10 x the gain of the path that feeds it each tick),
  * for `damage` hull%; `pierce` shots skip the armor and hit the hull. threshold 0 = not a weapon. */
 typedef struct { float threshold, damage; int pierce; } Dw2WeaponStats;
 Dw2WeaponStats dw2_weapon_stats(int item_id);
+/* the fraction of the power a Resistor item lets through (1R 0.75, 2R 0.5, 4R 0.25); 1 for anything else */
+float dw2_resistor_factor(int item_id);
+/* A Capacitor / Battery / Delayer / Transistor is DIRECTED by how it is rotated: its input is the west side turned `rotation` quarter turns, its
+ * output the east side turned the same, and a Transistor's gate the north side turned the same. */
+uint8_t dw2_rotated_port(uint8_t port, int rotation);
 
 typedef struct {
     int item_id;                 /* index into dw2_catalog, -1 = empty slot */
@@ -54,6 +71,10 @@ typedef struct {
     float armor;
     float armor_max;                        /* the armor the ship started the fight with (+ permanent gains): what an Aegis recharges to */
     int cargo_value;
+    float ore_armor;                        /* armor currently granted by Bulwark cells touching intact Aether Ore */
+    float cell_q[DW2_GRID_CELLS];           /* stored charge of a Capacitor / Battery cell; a Delayer's newest tick */
+    float cell_q2[DW2_GRID_CELLS];          /* a Delayer's older tick */
+    uint8_t gate_open[DW2_GRID_CELLS];      /* a Transistor whose gate was fed on the previous tick */
     int shatter_events;                     /* test-observable: how many times Back-EMF has fired */
     float dmg_mult;                         /* multiplies this ship's OWN weapon damage output for
                                               * the current round of ticks -- 1.0 = neutral. Set by

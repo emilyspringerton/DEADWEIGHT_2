@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
         } else if (m.type == DW2_S_OPP_CUT) {
             printf("OPP_CUT idx=%u\n", m.u.opp_cut.placement_idx);
         } else if (m.type == DW2_S_ROUND_BREAK) {
-            printf("ROUND_BREAK round=%u behind=%u target_ms=%u budget_ms=%u\n", m.u.round_break.round_no,
+            printf("ROUND_BREAK round=%u standing(0 level,1 behind,2 ahead)=%u target_ms=%u budget_ms=%u\n", m.u.round_break.round_no,
                    m.u.round_break.behind, m.u.round_break.target_ms, m.u.round_break.budget_ms);
             /* Default (no matching --round-call): stay silent, exactly like this tool always
              * behaved before the round-break redesign existed -- graded DW2_GRADE_NONE, a fully

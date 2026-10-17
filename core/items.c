@@ -132,4 +132,46 @@ const Dw2ItemDef dw2_catalog[DW2_ITEM_COUNT] = {
         .split_class = DW2_SPLIT_NONE, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_AEGIS } },
     },
+    [12] = {
+        /* Resistor 1 ohm: a wire that lets 75% of the power through. Aimed at a Capacitor it slows the charge, so the burst comes later. */
+        .name = "Resistor 1R", .kind = DW2_KIND_OPERATIONS, .value = 60,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_RESISTOR } },
+    },
+    [13] = {
+        .name = "Resistor 2R", .kind = DW2_KIND_OPERATIONS, .value = 70,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_RESISTOR } },
+    },
+    [14] = {
+        .name = "Resistor 4R", .kind = DW2_KIND_OPERATIONS, .value = 80,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_RESISTOR } },
+    },
+    [15] = {
+        /* Capacitor: takes in whatever it is fed and holds it; at 30 stored it lets all of it go in a single tick. A way to choose WHEN power arrives. */
+        .name = "Capacitor", .kind = DW2_KIND_OPERATIONS, .value = 140,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_CAPACITOR } },
+    },
+    [16] = {
+        /* Battery: starts half charged, gives up to 15 a tick to whatever it touches, and recharges from whatever feeds it. Keeps a gun
+         * firing after its generator is gone, and banks surplus when you feed it more than it gives. */
+        .name = "Battery", .kind = DW2_KIND_OPERATIONS, .value = 180,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_BATTERY } },
+    },
+    [17] = {
+        /* Transistor: a T. The two opposite sides are the channel (power in one, out the other); the stem is the gate. While the gate
+         * was fed on the previous tick (2 or more) the channel conducts; otherwise it is shut. A trickle can switch a flood. */
+        .name = "Transistor", .kind = DW2_KIND_OPERATIONS, .value = 200,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E | DW2_PORT_N, DW2_ROLE_TRANSISTOR } },
+    },
+    [18] = {
+        /* Delayer: what goes in comes out two ticks later. */
+        .name = "Delayer", .kind = DW2_KIND_OPERATIONS, .value = 160,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_DELAYER } },
+    },
 };

@@ -31,7 +31,7 @@
 #define MAX_MATCHES 256
 #define INBUF 1024
 #define OUTBUF 4096
-#define PACK_MS_DEFAULT 60000
+#define PACK_MS_DEFAULT 120000
 #define TICK_MS_DEFAULT 1000
 #define HELLO_TIMEOUT_MS 10000
 
@@ -240,7 +240,7 @@ static void begin_round_break(int mi) {
         const Dw2Ship *you = &mt->ship[s], *opp = &mt->ship[1 - s];
         Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_ROUND_BREAK;
         m.u.round_break.round_no = (uint8_t)mt->round_no;
-        m.u.round_break.behind = (uint8_t)(you->hull_pct < opp->hull_pct);
+        m.u.round_break.behind = (uint8_t)dw2_standing(you->hull_pct, you->armor, opp->hull_pct, opp->armor);
         m.u.round_break.target_ms = dw2_round_target_ms(mt->seed, mt->round_no);
         m.u.round_break.budget_ms = DW2_ROUND_BUDGET_MS;
         send_msg(mt->conn[s], &m);
@@ -254,8 +254,8 @@ static void begin_round_break(int mi) {
  * learn what your opponent actually did after it's already locked in), then resumes ticking. */
 static void resolve_round_break(int mi) {
     Match *mt = &matches[mi];
-    float hull0 = mt->ship[0].hull_pct, hull1 = mt->ship[1].hull_pct;
-    int behind[2] = { hull0 < hull1, hull1 < hull0 };
+    const Dw2Ship *sh0 = &mt->ship[0], *sh1 = &mt->ship[1];
+    int behind[2] = { dw2_standing(sh0->hull_pct, sh0->armor, sh1->hull_pct, sh1->armor), dw2_standing(sh1->hull_pct, sh1->armor, sh0->hull_pct, sh0->armor) };
     int grade[2]; Dw2RoundEffect eff[2]; int call[2];
     for (int s = 0; s < 2; s++) {
         int no_call = (mt->round_call[s] < 0);
@@ -350,7 +350,7 @@ static int start_match(int a, int b) {
         Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_MATCH_FOUND;
         m.u.match_found.match_id = mt->id; m.u.match_found.seed = mt->seed; m.u.match_found.seat = (uint8_t)s;
         memcpy(m.u.match_found.opp_name, conns[oi].name, DW2_NAME_LEN + 1); m.u.match_found.opp_kind = conns[oi].kind;
-        m.u.match_found.pack_ms = (uint16_t)opt_pack_ms;
+        m.u.match_found.pack_ms = (uint32_t)opt_pack_ms;
         send_msg(ci, &m);
     }
     vlog("match %u: %s(%d) vs %s(%d) seed=%u", mt->id, conns[a].name, conns[a].kind, conns[b].name, conns[b].kind, mt->seed);

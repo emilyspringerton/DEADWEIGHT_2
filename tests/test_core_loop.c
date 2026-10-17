@@ -133,11 +133,11 @@ static void test_splitter_one_to_many(void) {
     Dw2Ship dummy_target; dw2_ship_init(&dummy_target); dw2_ship_start_combat(&dummy_target);
     dw2_ship_start_combat(&s);
     dw2_ship_tick(&s, &dummy_target);
-    CHECK(s.weapon_charge[wn] == DW2_GENERATOR_OUTPUT);
-    CHECK(s.weapon_charge[ws] == DW2_GENERATOR_OUTPUT);
+    CHECK(s.weapon_charge[wn] == DW2_GENERATOR_OUTPUT / 2.0f);   /* a Splitter DIVIDES power: 5 W each way */
+    CHECK(s.weapon_charge[ws] == DW2_GENERATOR_OUTPUT / 2.0f);
 }
 
-static void test_many_to_one_rejected(void) {
+static void test_many_to_one_adds(void) {
     /* Two independent Generators both wired into the SAME Splitter from two different ports.
      * Many-to-one is not legal (SPEC_REVIEW.md §3): only the first-processed feed conducts: the
      * splitter's downstream weapon must see exactly ONE tick's worth of charge, not two. */
@@ -150,7 +150,12 @@ static void test_many_to_one_rejected(void) {
     Dw2Ship dummy_target; dw2_ship_init(&dummy_target); dw2_ship_start_combat(&dummy_target);
     dw2_ship_start_combat(&s);
     dw2_ship_tick(&s, &dummy_target);
-    CHECK(s.weapon_charge[weapon] == DW2_GENERATOR_OUTPUT); /* not 2x */
+    CHECK(s.weapon_charge[weapon] == DW2_GENERATOR_OUTPUT); /* two feeds ADD: 5 W + 5 W (one feed alone gives 5) */
+    Dw2Ship one; dw2_ship_init(&one);
+    dw2_ship_place(&one, DW2_ITEM_GENERATOR, 1, 0, 0); dw2_ship_place(&one, DW2_ITEM_SPLITTER, 1, 1, 0);
+    int w1 = dw2_ship_place(&one, DW2_ITEM_RAILGUN, 2, 1, 1);
+    dw2_ship_start_combat(&one); dw2_ship_tick(&one, &dummy_target);
+    CHECK(one.weapon_charge[w1] == DW2_GENERATOR_OUTPUT / 2.0f);
 }
 
 static void test_back_emf_shatters_loop(void) {
@@ -275,17 +280,23 @@ static void test_round_overcharge_payoffs(void) {
     e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, target, 0, &grade);
     CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.dmg_mult == 1.5f); CHECK(e.self_damage == 0.0f); CHECK(e.armor_bonus == 0.0f);
     e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, target, 1, &grade);
-    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.dmg_mult == 2.0f); /* behind: comeback amplifies */
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.dmg_mult == 1.0f + 0.5f * 1.6f); /* behind: a win pays 60% more */
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, target, 2, &grade);
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.dmg_mult == 1.0f + 0.5f * 0.4f); /* ahead: a win pays only 40% */
 
     uint32_t good_ms = (uint32_t)target + DW2_ROUND_PERFECT_MS + 1;
     e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, good_ms, 0, &grade);
     CHECK(grade == DW2_GRADE_GOOD); CHECK(e.dmg_mult == 1.25f);
     e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, good_ms, 1, &grade);
-    CHECK(grade == DW2_GRADE_GOOD); CHECK(e.dmg_mult == 1.5f); /* behind GOOD == ahead PERFECT: real teeth */
+    CHECK(grade == DW2_GRADE_GOOD); CHECK(e.dmg_mult == 1.0f + 0.25f * 1.6f);
 
     e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 0, &grade);
     CHECK(grade == DW2_GRADE_MISS);
     CHECK(e.dmg_mult == 1.0f); CHECK(e.self_damage == DW2_ROUND_OVERCHARGE_BACKFIRE_HULL); /* the real risk */
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 2, &grade);
+    CHECK(e.self_damage == DW2_ROUND_OVERCHARGE_BACKFIRE_HULL * 1.6f); /* ahead: a miss costs 60% more */
+    e = dw2_round_grade(777u, 1, DW2_CALL_OVERCHARGE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 1, &grade);
+    CHECK(e.self_damage == DW2_ROUND_OVERCHARGE_BACKFIRE_HULL * 1.4f); /* behind: a miss costs 40% more */
 }
 
 static void test_round_brace_payoffs(void) {
@@ -296,7 +307,10 @@ static void test_round_brace_payoffs(void) {
     e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, target, 0, &grade);
     CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.armor_bonus == 25.0f); CHECK(e.dmg_mult == 1.0f); CHECK(e.self_damage == 0.0f);
     e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, target, 1, &grade);
-    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.armor_bonus == 35.0f); /* behind: comeback amplifies */
+    CHECK(grade == DW2_GRADE_PERFECT); CHECK(e.armor_bonus == 25.0f * 1.6f); /* behind: 60% more */
+    e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, target, 2, &grade);
+    CHECK(e.armor_bonus == 25.0f * 0.4f); /* ahead: 40% */
+    CHECK(dw2_standing(50, 0, 40, 20) == DW2_STAND_BEHIND); CHECK(dw2_standing(50, 20, 40, 20) == DW2_STAND_AHEAD); CHECK(dw2_standing(40, 20, 50, 10) == DW2_STAND_LEVEL);
 
     e = dw2_round_grade(888u, 2, DW2_CALL_BRACE, 0, (uint32_t)target + DW2_ROUND_GOOD_MS + 1, 0, &grade);
     CHECK(grade == DW2_GRADE_MISS);
@@ -456,6 +470,128 @@ static void test_opp_ship_frames_roundtrip(void) {
     CHECK(n == 4 && dw2_decode(buf, (size_t)n, &d, &used) == 1 && d.u.opp_cut.placement_idx == 7);
 }
 
+
+/* ---- the circuit parts: resistors, capacitor, battery, transistor, delayer ---- */
+static void test_resistors_cut_power(void) {
+    int items[3] = { DW2_ITEM_RESISTOR_1, DW2_ITEM_RESISTOR_2, DW2_ITEM_RESISTOR_4 };
+    float want[3] = { 7.5f, 5.0f, 2.5f };
+    for (int k = 0; k < 3; k++) {
+        Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+        dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&me, items[k], 0, 1, 0);
+        int w = dw2_ship_place(&me, DW2_ITEM_RAILGUN, 0, 2, 0);
+        dw2_ship_start_combat(&me); dw2_ship_tick(&me, &foe);
+        CHECK(me.weapon_charge[w] == want[k]);
+    }
+}
+
+static void test_capacitor_bursts_when_full(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&me, DW2_ITEM_CAPACITOR, 0, 1, 0);
+    int w = dw2_ship_place(&me, DW2_ITEM_RAILGUN, 0, 2, 0);
+    dw2_ship_start_combat(&me);
+    fight_ticks(&me, &foe, 3);
+    CHECK(me.cell_q[1] == 30.0f && me.weapon_charge[w] == 0.0f);   /* three seconds banking: nothing has reached the gun */
+    dw2_ship_tick(&me, &foe);                                        /* second 4: the whole 30 in one tick */
+    CHECK(foe.armor == 500.0f - DW2_WEAPON_DAMAGE);
+    CHECK(me.cell_q[1] == 10.0f);                                    /* and it starts banking again */
+    /* it accepts power only on its input side: turned round, it is fed nothing */
+    Dw2Ship m2; dw2_ship_init(&m2);
+    dw2_ship_place(&m2, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&m2, DW2_ITEM_CAPACITOR, 0, 1, 2);
+    dw2_ship_start_combat(&m2); fight_ticks(&m2, &foe, 3);
+    CHECK(m2.cell_q[1] == 0.0f);
+}
+
+static void test_battery_supplies_without_a_generator(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_BATTERY, 0, 0, 0);
+    int w = dw2_ship_place(&me, DW2_ITEM_RAILGUN, 0, 1, 0);
+    dw2_ship_start_combat(&me);
+    CHECK(me.cell_q[0] == DW2_BAT_START);
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == 15.0f);
+    dw2_ship_tick(&me, &foe); CHECK(foe.armor == 485.0f);           /* 30 charge: a shot */
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == 15.0f && me.cell_q[0] == 0.0f);
+    fight_ticks(&me, &foe, 3); CHECK(me.weapon_charge[w] == 15.0f); /* empty: nothing more */
+    /* fed 10 and giving up to 15, it banks nothing; fed 20 (two generators) it banks the surplus up to 90 */
+    Dw2Ship m2; dw2_ship_init(&m2);
+    dw2_ship_place(&m2, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&m2, DW2_ITEM_BATTERY, 0, 1, 0);
+    dw2_ship_start_combat(&m2);
+    dw2_ship_tick(&m2, &foe);
+    CHECK(m2.cell_q[1] == 40.0f);                                        /* 45 - 15 given + 10 fed */
+}
+
+static void test_transistor_shut_without_a_gate_feed(void) {
+    Dw2Ship shut, foe; dw2_ship_init(&shut); big_foe(&foe);
+    dw2_ship_place(&shut, DW2_ITEM_GENERATOR, 1, 0, 0); dw2_ship_place(&shut, DW2_ITEM_TRANSISTOR, 1, 1, 0);
+    int ws = dw2_ship_place(&shut, DW2_ITEM_RAILGUN, 1, 2, 0);
+    dw2_ship_start_combat(&shut); fight_ticks(&shut, &foe, 5);
+    CHECK(shut.weapon_charge[ws] == 0.0f);
+}
+
+static void test_transistor_open_after_gate_fed(void) {
+    /* gate fed straight by a generator below it: tick 1 the gate is only being fed, so the channel is still shut; from tick 2 it conducts */
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 1, 0, 0);            /* (1,0) E -> transistor in */
+    dw2_ship_place(&me, DW2_ITEM_TRANSISTOR, 1, 1, 0);           /* (1,1): in W, out E, gate N */
+    int w = dw2_ship_place(&me, DW2_ITEM_RAILGUN, 1, 2, 0);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 1, 1);            /* (0,1) rot1: E -> S, into the gate */
+    dw2_ship_start_combat(&me);
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == 0.0f && me.gate_open[dw2_cell(1, 1)] == 1);
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == DW2_GENERATOR_OUTPUT);
+}
+
+static void test_delayer_holds_two_ticks(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&me, DW2_ITEM_DELAYER, 0, 1, 0);
+    int w = dw2_ship_place(&me, DW2_ITEM_RAILGUN, 0, 2, 0);
+    dw2_ship_start_combat(&me);
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == 0.0f);
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == 0.0f);
+    dw2_ship_tick(&me, &foe); CHECK(me.weapon_charge[w] == 10.0f);   /* what went in at second 1 comes out at second 3 */
+    fight_ticks(&me, &foe, 3); CHECK(foe.armor == 500.0f - DW2_WEAPON_DAMAGE);
+}
+
+static void test_titanium_beam_boosts_touching_weapons(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0);
+    dw2_ship_place(&me, DW2_ITEM_AMPLIFIER, 0, 1, 0); dw2_ship_place(&me, DW2_ITEM_AMPLIFIER, 0, 2, 0);
+    int w = dw2_ship_place(&me, DW2_ITEM_PULSE_LASER, 0, 3, 0);
+    CHECK(w >= 0);
+    dw2_ship_start_combat(&me);
+    dw2_ship_tick(&me, &foe);
+    CHECK(foe.hull_pct == 1000.0f - 6.0f);                              /* 22.5 charge: two shots of 3 */
+    /* the same ship with an intact Titanium Beam under the laser: each shot 4.5 */
+    Dw2Ship m2, f2; dw2_ship_init(&m2); big_foe(&f2);
+    dw2_ship_place(&m2, DW2_ITEM_GENERATOR, 0, 0, 0);
+    dw2_ship_place(&m2, DW2_ITEM_AMPLIFIER, 0, 1, 0); dw2_ship_place(&m2, DW2_ITEM_AMPLIFIER, 0, 2, 0);
+    dw2_ship_place(&m2, DW2_ITEM_PULSE_LASER, 0, 3, 0);
+    int beam = dw2_ship_place(&m2, DW2_ITEM_TITANIUM_BEAM, 1, 2, 0);   /* row 1, cols 2-5: touches the laser at (0,3) */
+    dw2_ship_start_combat(&m2); dw2_ship_tick(&m2, &f2);
+    CHECK(f2.hull_pct == 1000.0f - 9.0f);
+    /* cutting the beam takes the boost back */
+    CHECK(dw2_ship_panic_cut(&m2, beam) == 1);
+    dw2_ship_tick(&m2, &f2);
+    CHECK(f2.hull_pct == 1000.0f - 9.0f - 6.0f);                        /* back to 3 a shot */
+}
+
+static void test_aether_ore_plates_defense_and_cut_takes_it_back(void) {
+    Dw2Ship me; dw2_ship_init(&me);
+    int ore = dw2_ship_place(&me, DW2_ITEM_AETHER_ORE, 0, 0, 0);       /* (0,0)-(1,1) */
+    dw2_ship_place(&me, DW2_ITEM_BULWARK, 0, 2, 0);                    /* touches the ore */
+    dw2_ship_place(&me, DW2_ITEM_BULWARK, 5, 5, 0);                    /* does not */
+    dw2_ship_start_combat(&me);
+    CHECK(me.armor == 20.0f + 10.0f + 20.0f && me.armor_max == me.armor);
+    CHECK(dw2_ship_panic_cut(&me, ore) == 1);
+    CHECK(me.armor == 20.0f + 20.0f + 32.0f);                          /* the +10 is gone, four dead squares are +32 */
+}
+
+static void test_match_found_pack_ms_is_wide(void) {
+    Dw2WireMsg m, d; memset(&m, 0, sizeof m); m.type = DW2_S_MATCH_FOUND; m.u.match_found.pack_ms = 120000u;
+    uint8_t buf[256]; size_t used = 0;
+    int n = dw2_encode(&m, buf, sizeof buf);
+    CHECK(n == 2 + 1 + 30);
+    CHECK(dw2_decode(buf, (size_t)n, &d, &used) == 1 && d.u.match_found.pack_ms == 120000u);
+}
+
 int main(void) {
     test_placement_legality();
     test_rotation_math();
@@ -463,7 +599,7 @@ int main(void) {
     test_panic_cut_blocked_by_neighbor();
     test_straight_chain_fires();
     test_splitter_one_to_many();
-    test_many_to_one_rejected();
+    test_many_to_one_adds();
     test_back_emf_shatters_loop();
     test_panic_cut_mid_fight_changes_routing();
     test_match_result_timeout_tiebreak();
@@ -481,6 +617,15 @@ int main(void) {
     test_mender_heals_and_caps();
     test_aegis_recharges_to_its_starting_armor();
     test_opp_ship_frames_roundtrip();
+    test_resistors_cut_power();
+    test_capacitor_bursts_when_full();
+    test_battery_supplies_without_a_generator();
+    test_transistor_shut_without_a_gate_feed();
+    test_transistor_open_after_gate_fed();
+    test_delayer_holds_two_ticks();
+    test_titanium_beam_boosts_touching_weapons();
+    test_aether_ore_plates_defense_and_cut_takes_it_back();
+    test_match_found_pack_ms_is_wide();
     printf("test_core_loop: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

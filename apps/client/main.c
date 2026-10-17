@@ -264,7 +264,7 @@ static void handle_server_msg(const Dw2WireMsg *m) {
     case DW2_S_ROUND_BREAK:
         round_break_active = 1;
         printf("ROUND_BREAK round=%u%s -- press O (Overcharge) or B (Brace), aim for ~%ums (budget %ums)\n",
-               m->u.round_break.round_no, m->u.round_break.behind ? " [you are BEHIND -- a hit pays off more]" : "",
+               m->u.round_break.round_no, m->u.round_break.behind == 1 ? " [you are BEHIND -- a win pays 60% more, a miss costs 40% more]" : m->u.round_break.behind == 2 ? " [you LEAD -- a win pays 40%, a miss costs 60% more]" : "",
                m->u.round_break.target_ms, m->u.round_break.budget_ms);
         break;
     case DW2_S_ROUND_RESULT:

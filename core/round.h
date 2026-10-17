@@ -55,13 +55,22 @@ uint16_t dw2_round_target_ms(uint32_t match_seed, int round_no);
 /* The mechanical effect of one graded call, applied once to the calling ship at resolution. */
 typedef struct { float dmg_mult; float armor_bonus; float self_damage; } Dw2RoundEffect;
 
+/* Where a ship stands at the break: the catch-up lever. The standing is hull + armor, theirs against yours.
+ * LEADING: a win is worth only 40% of its bonus and a miss costs 60% more. TRAILING: a win is worth 60% more and a miss costs 40% more. */
+enum { DW2_STAND_LEVEL = 0, DW2_STAND_BEHIND = 1, DW2_STAND_AHEAD = 2 };
+#define DW2_STAND_AHEAD_WIN   0.4f
+#define DW2_STAND_AHEAD_MISS  1.6f
+#define DW2_STAND_BEHIND_WIN  1.6f
+#define DW2_STAND_BEHIND_MISS 1.4f
+int dw2_standing(float my_hull, float my_armor, float their_hull, float their_armor);
+
 /* Grades a call. `no_call`=1 means nothing arrived by the deadline: always DW2_GRADE_NONE with a
  * fully neutral effect (a player can't be punished -- or rewarded -- for a mini-game they never
- * engaged with; `call`/`elapsed_ms` are ignored in that case). `behind`=1 means this ship's hull%
- * was strictly lower than its opponent's at the moment of grading (the comeback trigger).
+ * engaged with; `call`/`elapsed_ms` are ignored in that case). `standing` is a DW2_STAND_* value: whether this ship
+ * was behind, level or ahead of its opponent on hull + armor at the moment of grading (the catch-up trigger).
  * `*out_grade` receives the DW2_GRADE_* result. */
 Dw2RoundEffect dw2_round_grade(uint32_t match_seed, int round_no, int call, int no_call,
-                                uint32_t elapsed_ms, int behind, int *out_grade);
+                                uint32_t elapsed_ms, int standing, int *out_grade);
 
 /* Applies a graded effect to a ship: sets its dmg_mult for the next round of ticks (reset to 1.0
  * by the next round-break's own dw2_round_grade result if this ship doesn't call again), adds any

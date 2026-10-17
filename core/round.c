@@ -14,8 +14,13 @@ uint16_t dw2_round_target_ms(uint32_t match_seed, int round_no) {
     return (uint16_t)(DW2_ROUND_TARGET_MIN_MS + (h % DW2_ROUND_TARGET_MS_SPAN));
 }
 
+int dw2_standing(float my_hull, float my_armor, float their_hull, float their_armor) {
+    float mine = my_hull + my_armor, theirs = their_hull + their_armor;
+    return mine > theirs ? DW2_STAND_AHEAD : mine < theirs ? DW2_STAND_BEHIND : DW2_STAND_LEVEL;
+}
+
 Dw2RoundEffect dw2_round_grade(uint32_t match_seed, int round_no, int call, int no_call,
-                                uint32_t elapsed_ms, int behind, int *out_grade) {
+                                uint32_t elapsed_ms, int standing, int *out_grade) {
     Dw2RoundEffect e = { 1.0f, 0.0f, 0.0f };
     if (no_call) { *out_grade = DW2_GRADE_NONE; return e; }
 
@@ -26,13 +31,17 @@ Dw2RoundEffect dw2_round_grade(uint32_t match_seed, int round_no, int call, int 
               : DW2_GRADE_MISS;
     *out_grade = grade;
 
+    /* the catch-up lever: how much a win is worth and how much a miss costs depends on who is ahead */
+    float k_win  = standing == DW2_STAND_AHEAD ? DW2_STAND_AHEAD_WIN  : standing == DW2_STAND_BEHIND ? DW2_STAND_BEHIND_WIN  : 1.0f;
+    float k_miss = standing == DW2_STAND_AHEAD ? DW2_STAND_AHEAD_MISS : standing == DW2_STAND_BEHIND ? DW2_STAND_BEHIND_MISS : 1.0f;
+
     if (call == DW2_CALL_OVERCHARGE) {
-        if (grade == DW2_GRADE_PERFECT) e.dmg_mult = behind ? 2.0f : 1.5f;
-        else if (grade == DW2_GRADE_GOOD) e.dmg_mult = behind ? 1.5f : 1.25f;
-        else e.self_damage = DW2_ROUND_OVERCHARGE_BACKFIRE_HULL; /* MISS: the risky call backfires */
+        if (grade == DW2_GRADE_PERFECT) e.dmg_mult = 1.0f + 0.5f * k_win;
+        else if (grade == DW2_GRADE_GOOD) e.dmg_mult = 1.0f + 0.25f * k_win;
+        else e.self_damage = DW2_ROUND_OVERCHARGE_BACKFIRE_HULL * k_miss; /* MISS: the risky call backfires */
     } else if (call == DW2_CALL_BRACE) {
-        if (grade == DW2_GRADE_PERFECT) e.armor_bonus = behind ? 35.0f : 25.0f;
-        else if (grade == DW2_GRADE_GOOD) e.armor_bonus = behind ? 18.0f : 12.0f;
+        if (grade == DW2_GRADE_PERFECT) e.armor_bonus = 25.0f * k_win;
+        else if (grade == DW2_GRADE_GOOD) e.armor_bonus = 12.0f * k_win;
         /* MISS: no bonus, no penalty either -- Brace is the safe, low-ceiling call. */
     }
     return e;

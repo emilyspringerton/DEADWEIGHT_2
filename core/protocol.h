@@ -60,7 +60,7 @@ typedef struct {
         struct { uint32_t nonce; } ping;             /* PING and PONG */
         struct { uint32_t session_id; uint8_t flags; } welcome;
         struct { uint16_t waiting; } queued;
-        struct { uint32_t match_id, seed; uint8_t seat; char opp_name[DW2_NAME_LEN + 1]; uint8_t opp_kind; uint16_t pack_ms; } match_found;
+        struct { uint32_t match_id, seed; uint8_t seat; char opp_name[DW2_NAME_LEN + 1]; uint8_t opp_kind; uint32_t pack_ms; } match_found;
         struct { uint8_t placement_idx; } place_ack;
         struct { uint8_t reason; } place_reject;
         struct { uint8_t placement_idx; } cut_ack;

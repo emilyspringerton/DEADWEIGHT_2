@@ -9,7 +9,11 @@
  * The second batch is dense wiring (generators, conductors, splitters and weapons in a small corner), which is where closed loops and
  * Back-EMF meltdowns come from; uniformly random ships almost never have one.
  *
- *   dw2_ref_dump [random-count] [seed] [dense-count] > ref.txt */
+ * The third batch is structured circuits: a generator, a chain of random circuit parts along a row, a weapon at the end, sometimes a second
+ * generator feeding a transistor's gate from above and a Titanium Beam or Aether Ore laid beside the guns and armor. Random placement almost never
+ * builds a working Capacitor / Transistor / Delayer circuit, and these are what exercise them.
+ *
+ *   dw2_ref_dump [random-count] [seed] [dense-count] [chain-count] > ref.txt */
 #include "../core/combat.h"
 #include "../apps/bot/loadouts.h"
 #include <stdio.h>
@@ -19,7 +23,7 @@ static uint64_t rs = 0x9E3779B97F4A7C15ull;
 static uint32_t rnd(void) { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return (uint32_t)(rs >> 11); }
 
 /* splitters make rings; a ring is a closed loop and (after a few ticks) a meltdown */
-static const int dense_pool[16] = { 0, 0, 2, 2, 2, 2, 1, 1, 9, 9, 3, 7, 8, 10, 11, 2 };
+static const int dense_pool[32] = { 0, 0, 2, 2, 2, 1, 1, 9, 3, 7, 8, 10, 11, 12, 13, 14, 15, 15, 16, 17, 17, 18, 18, 3, 3, 4, 5, 6, 2, 1, 0, 9 };
 
 static void dump(int idx, const Dw2BotLoadout *lo) {
     Dw2Ship me, foe;
@@ -43,8 +47,40 @@ static void dump(int idx, const Dw2BotLoadout *lo) {
         dw2_ship_tick(&me, &foe);
         int dmg = (int)((ba - foe.armor) + (bh - foe.hull_pct) + 0.5f);
         unsigned long long burned = (unsigned long long)me.burned;
-        printf("T %d %d %d %llx %d %d\n", t, dmg, me.shatter_events, burned, (int)(me.hull_pct + 0.5f), (int)(me.armor + 0.5f));
+        /* the charge held in capacitors, batteries and delayers, and the open transistor gates: so a wrong STATE is seen the tick it appears */
+        double q = 0; int gates = 0;
+        for (int c = 0; c < DW2_GRID_CELLS; c++) { q += me.cell_q[c] + me.cell_q2[c]; gates += me.gate_open[c] ? (1 << (c % 20)) : 0; }
+        printf("T %d %d %d %llx %d %d %d %d\n", t, dmg, me.shatter_events, burned, (int)(me.hull_pct + 0.5f), (int)(me.armor + 0.5f), (int)(q * 100.0 + 0.5), gates);
     }
+}
+
+
+static void try_add(Dw2BotLoadout *lo, Dw2BotOp o) {
+    if (lo->n >= 16) return;
+    Dw2Ship t; dw2_ship_init(&t);
+    for (int j = 0; j < lo->n; j++) if (dw2_ship_place(&t, lo->op[j].item, lo->op[j].row, lo->op[j].col, lo->op[j].rot) < 0) return;
+    if (dw2_ship_place(&t, o.item, o.row, o.col, o.rot) >= 0) lo->op[lo->n++] = o;
+}
+
+static Dw2BotLoadout chain_ship(void) {
+    static const int parts[] = { 1, 1, 9, 12, 13, 14, 15, 15, 16, 17, 18, 18, 2, 7 };
+    Dw2BotLoadout lo; lo.n = 0;
+    int row = (int)(rnd() % 6), len = 2 + (int)(rnd() % 4);
+    try_add(&lo, (Dw2BotOp){ 0, row, 0, 0, 0 });
+    for (int k = 1; k <= len && k < 5; k++) {
+        int it = parts[rnd() % (sizeof parts / sizeof parts[0])];
+        int rot = (rnd() % 8 == 0) ? (int)(rnd() % 4) : 0;
+        try_add(&lo, (Dw2BotOp){ it, row, k, rot, 0 });
+        if (it == 17 && row > 0) try_add(&lo, (Dw2BotOp){ 0, row - 1, k, 1, 0 });   /* a generator above, pointing down into the gate */
+        if (it == 17 && row > 1 && rnd() % 2) try_add(&lo, (Dw2BotOp){ 12 + (int)(rnd() % 3), row - 1, k, 1, 0 });
+    }
+    int wp[] = { 3, 3, 7, 8, 10, 11 };
+    try_add(&lo, (Dw2BotOp){ wp[rnd() % 6], row, len + 1 > 5 ? 5 : len + 1, 0, 0 });
+    if (rnd() % 2) try_add(&lo, (Dw2BotOp){ 5, (row + 1) % 6, 1 + (int)(rnd() % 3), 0, (rnd() % 3) == 0 });
+    if (rnd() % 2) try_add(&lo, (Dw2BotOp){ 6, (row + 2) % 6, (int)(rnd() % 4), 0, (rnd() % 3) == 0 });
+    for (int k = 0, n = (int)(rnd() % 4); k < n; k++) try_add(&lo, (Dw2BotOp){ 4, (int)(rnd() % 6), (int)(rnd() % 6), 0, 0 });
+    if (rnd() % 3 == 0) try_add(&lo, (Dw2BotOp){ 0, (int)(rnd() % 6), (int)(rnd() % 6), (int)(rnd() % 4), 0 });
+    return lo;
 }
 
 int main(int argc, char **argv) {
@@ -60,7 +96,7 @@ int main(int argc, char **argv) {
         Dw2BotLoadout lo; lo.n = 0;
         int tries = 20 + (int)(rnd() % 40);
         for (int k = 0; k < tries && lo.n < 16; k++) {
-            Dw2BotOp o = d ? (Dw2BotOp){ dense_pool[rnd() % 16], (int)(rnd() % 3), (int)(rnd() % 3), (int)(rnd() % 4), 0 }
+            Dw2BotOp o = d ? (Dw2BotOp){ dense_pool[rnd() % 32], (int)(rnd() % 3), (int)(rnd() % 3), (int)(rnd() % 4), 0 }
                            : (Dw2BotOp){ (int)(rnd() % DW2_ITEM_COUNT), (int)(rnd() % 6), (int)(rnd() % 6), (int)(rnd() % 4), (rnd() % 3) == 0 };
             Dw2Ship t; dw2_ship_init(&t);
             int ok = 1;
@@ -69,5 +105,7 @@ int main(int argc, char **argv) {
         }
         dump(1000 + i, &lo);
     }
+    int chains = argc > 4 ? atoi(argv[4]) : 800;
+    for (int i = 0; i < chains; i++) { Dw2BotLoadout lo = chain_ship(); dump(5000 + i, &lo); }
     return 0;
 }

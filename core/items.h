@@ -8,7 +8,7 @@
 
 #include "grid.h"
 
-#define DW2_ITEM_COUNT 12
+#define DW2_ITEM_COUNT 19
 #define DW2_MAX_FRAGMENTS 4
 
 /* Stable indices into dw2_catalog[] -- see items.c for the authored data these name. */
@@ -25,6 +25,13 @@ enum {
     DW2_ITEM_AMPLIFIER,
     DW2_ITEM_MENDER,
     DW2_ITEM_AEGIS,
+    DW2_ITEM_RESISTOR_1,    /* appended: the circuit parts. Power is watts; see combat.h */
+    DW2_ITEM_RESISTOR_2,
+    DW2_ITEM_RESISTOR_4,
+    DW2_ITEM_CAPACITOR,
+    DW2_ITEM_BATTERY,
+    DW2_ITEM_TRANSISTOR,
+    DW2_ITEM_DELAYER,
 };
 
 typedef enum {
@@ -37,7 +44,12 @@ typedef enum {
     DW2_ROLE_DEAD,         /* a fragment's Dead Square: inert, becomes armor (NORTHSTAR.md) */
     DW2_ROLE_AMPLIFIER,    /* a wire that lifts the energy passing through it by DW2_AMPLIFIER_GAIN */
     DW2_ROLE_MENDER,       /* fed: mends hull every tick */
-    DW2_ROLE_AEGIS         /* fed: recharges armor every tick, up to the armor the ship started with */
+    DW2_ROLE_AEGIS,        /* fed: recharges armor every tick, up to the armor the ship started with */
+    DW2_ROLE_RESISTOR,     /* a wire that passes only a fraction of the power (the item id says which fraction) */
+    DW2_ROLE_CAPACITOR,    /* banks what it is fed and releases it all in one burst when full */
+    DW2_ROLE_BATTERY,      /* a reservoir: soaks up what it is fed and puts out a steady supply, even with no generator */
+    DW2_ROLE_TRANSISTOR,   /* a switch: the power through its channel flows only while its gate side is energized */
+    DW2_ROLE_DELAYER       /* holds what it is fed for two ticks, then lets it go */
 } Dw2Role;
 
 typedef enum { DW2_KIND_OFFENSE = 0, DW2_KIND_OPERATIONS, DW2_KIND_DEFENSE } Dw2Kind;
