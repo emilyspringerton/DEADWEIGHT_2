@@ -88,13 +88,13 @@ const Dw2ItemDef dw2_catalog[DW2_ITEM_COUNT] = {
         .base = { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE }, { 0, 1, 0, DW2_ROLE_NONE }, { 1, 1, 0, DW2_ROLE_NONE } },
     },
     [DW2_ITEM_PULSE_LASER] = {
-        /* A fast, light beam: 10 W fires it every second for 4. It needs a clear lane (nothing of yours in front of it) and cannot be dodged. */
+        /* A fast, light beam: 10 W fires it every second for 7. It needs a clear lane (nothing of yours in front of it) and cannot be dodged. */
         .name = "Pulse Laser", .kind = DW2_KIND_OFFENSE, .cost = 120, .weight = 3, .hp = 35,
         .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON } },
     },
     [DW2_ITEM_SIEGE_CANNON] = {
-        /* A 1x2 mortar: fed at its west end, the barrel is the second cell. Its shell comes down from above on the DEEPEST part in the lane, over any wall. */
+        /* A 1x2 mortar: fed at its west end, the barrel is the second cell. 10 W fires it every 3rd second: a 45 shell that comes down from above on the DEEPEST part in the lane, over any wall. */
         .name = "Siege Cannon", .kind = DW2_KIND_OFFENSE, .cost = 230, .weight = 10, .hp = 30,
         .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 2,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON }, { 1, 0, 0, DW2_ROLE_NONE } },

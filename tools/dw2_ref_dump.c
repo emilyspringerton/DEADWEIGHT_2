@@ -18,6 +18,7 @@
 #include "../apps/bot/loadouts.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static uint64_t rs = 0x9E3779B97F4A7C15ull;
 static uint32_t rnd(void) { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return (uint32_t)(rs >> 11); }
@@ -57,7 +58,19 @@ static void dump(int idx, const Ship *lo) {
         if (w.kind != DW2_SHOT_LASER) { printf(" -"); continue; }
         printf(" %d", dw2_lane_clear_ahead(&me, me.placements[p].cells[0].row * DW2_GRID_W + me.placements[p].cells[0].col));
     }
+    printf(" O");
+    for (int kind = 1; kind <= 3; kind++) for (int lane = 0; lane < DW2_GRID_W; lane++) printf(" %d", dw2_lane_shots_to_open(&me, lane, kind));
     printf("\n");
+    /* the pieces each splittable part becomes, in place */
+    for (int p = 0; p < me.placement_n; p++) {
+        Dw2SplitPiece pc[4];
+        int np = dw2_split_pieces(me.placements[p].item_id, me.placements[p].rotation, me.placements[p].anchor_row, me.placements[p].anchor_col, pc);
+        if (np > 0) {
+            printf("P %d %d", p, np);
+            for (int k = 0; k < np; k++) printf(" %d,%d,%d,%d", pc[k].item, pc[k].row, pc[k].col, pc[k].rotation);
+            printf("\n");
+        }
+    }
     /* the schedule of destroyed cells: up to two, at ticks 4..24, on cells that hold something */
     int kills = (int)(rnd() % 3), kt[2] = {0, 0}, kc[2] = {0, 0};
     for (int k = 0; k < kills; k++) {
@@ -74,7 +87,10 @@ static void dump(int idx, const Ship *lo) {
         /* the charge held in capacitors, batteries and delayers, and the open transistor gates: so a wrong STATE is seen the tick it appears */
         double q = 0; int gates = 0;
         for (int c = 0; c < DW2_GRID_CELLS; c++) { q += me.cell_q[c] + me.cell_q2[c]; gates += me.gate_open[c] ? (1 << (c % 20)) : 0; }
-        printf("T %d %d %d %llx %llx %d %d\n", t, shots, me.shatter_events, (unsigned long long)me.burned, (unsigned long long)me.dead, (int)(q * 100.0 + 0.5), gates);
+        /* parts the second's events destroyed (heat): a client is TOLD about these by EVENTS, it does not work them out */
+        char lost[128]; lost[0] = 0;
+        for (int i = 0; i < log.n; i++) if (log.ev[i].type == DW2_EV_HEAT && log.ev[i].d == 1) { char b[8]; snprintf(b, sizeof b, "%s%d", lost[0] ? "," : "", log.ev[i].a); strcat(lost, b); }
+        printf("T %d %d %d %llx %llx %d %d %s\n", t, shots, me.shatter_events, (unsigned long long)me.burned, (unsigned long long)me.dead, (int)(q * 100.0 + 0.5), gates, lost[0] ? lost : "-");
     }
 }
 

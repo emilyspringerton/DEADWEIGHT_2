@@ -19,6 +19,7 @@ static int g_checks = 0, g_failures = 0;
     if (!(cond)) { g_failures++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 #define NEAR(a, b) CHECK(fabsf((float)(a) - (float)(b)) < 0.01f)
+#define LASER 7.0f   /* a Pulse Laser shot's damage */
 
 /* a target that never shoots back, with a hull big enough that nothing ends the fight */
 static void foe_ship(Dw2Ship *f) { dw2_ship_init(f); f->idx = 1; }
@@ -213,7 +214,7 @@ static void test_laser_needs_a_clear_lane(void) {
     CHECK(me.weapon_charge[w] == 10.0f);        /* held at its threshold, not piling up */
     me.cell_hp[dw2_cell(0, 1)] = 0.0f; me.dead |= dw2_bit(dw2_cell(0, 1));
     ticks(&me, &foe, 1);
-    NEAR(foe.hull_pct, 100.0f - 2.0f * 10.0f * DW2_HULL_FACTOR);    /* the held shot and this second's: two */
+    NEAR(foe.hull_pct, 100.0f - 2.0f * LASER * DW2_HULL_FACTOR);    /* the held shot and this second's: two */
     /* the same laser on the bow row is never blocked */
     Dw2Ship m2; dw2_ship_init(&m2); armed(&m2, 0, DW2_ITEM_PULSE_LASER); dw2_ship_start_combat(&m2);
     CHECK(dw2_lane_clear_ahead(&m2, dw2_cell(0, 1)) == 1);
@@ -232,12 +233,16 @@ static void test_laser_hits_the_first_part_in_its_lane(void) {
     dw2_ship_start_combat(&foe);
     Dw2EventLog log; memset(&log, 0, sizeof log);
     dw2_ship_tick(&me, &foe, &log);
-    CHECK(hp(&foe, 2, 1) == 0.0f && (foe.dead & dw2_bit(dw2_cell(2, 1))));      /* 10 damage: the Conductor (10 HP) is destroyed */
+    NEAR(hp(&foe, 2, 1), 10.0f - LASER);                                        /* 7 on the Conductor (10 HP) */
     CHECK(hp(&foe, 4, 1) == 45.0f);                                             /* a laser does not go through */
     CHECK(log.ev[0].type == DW2_EV_FIRE && log.ev[0].side == 0 && log.ev[0].c == 1);
-    CHECK(log.ev[1].type == DW2_EV_HIT && log.ev[1].side == 1 && log.ev[1].a == dw2_cell(2, 1) && (log.ev[1].d & DW2_HITF_DESTROYED));
+    CHECK(log.ev[1].type == DW2_EV_HIT && log.ev[1].side == 1 && log.ev[1].a == dw2_cell(2, 1) && !(log.ev[1].d & DW2_HITF_DESTROYED));
+    memset(&log, 0, sizeof log);
+    dw2_ship_tick(&me, &foe, &log);                                             /* the second shot destroys it */
+    CHECK(hp(&foe, 2, 1) == 0.0f && (foe.dead & dw2_bit(dw2_cell(2, 1))));
+    CHECK(log.ev[1].type == DW2_EV_HIT && (log.ev[1].d & DW2_HITF_DESTROYED));
     dw2_ship_tick(&me, &foe, NULL);                                             /* now the Bulwark: lasers do half to it */
-    NEAR(hp(&foe, 4, 1), 45.0f - 10.0f * 0.5f);
+    NEAR(hp(&foe, 4, 1), 45.0f - LASER * 0.5f);
     CHECK(foe.hull_pct == 100.0f);
 }
 
@@ -268,7 +273,7 @@ static void test_cannon_lands_on_the_deepest_part_and_splashes(void) {
     dw2_ship_place(&foe, DW2_ITEM_CONDUCTOR, 5, 2, 0);      /* touches it: splash 22.5 on 10 HP */
     dw2_ship_place(&foe, DW2_ITEM_BULWARK, 4, 1, 0);        /* touches it from the bow side: splash 22.5 on 45 HP */
     dw2_ship_start_combat(&foe);
-    ticks(&me, &foe, 4);                                    /* 40 charge at 10 W: the 4th second */
+    ticks(&me, &foe, 3);                                    /* 30 charge at 10 W: the 3rd second */
     CHECK(hp(&foe, 0, 1) == 45.0f);
     CHECK(hp(&foe, 5, 1) == 0.0f);                          /* 45 on 20 HP */
     CHECK(hp(&foe, 5, 2) == 0.0f);                          /* splash 22.5 on 10 HP */
@@ -294,7 +299,7 @@ static void test_materials_resist_the_right_weapons(void) {
     Dw2Ship m2; dw2_ship_init(&m2); armed(&m2, 0, DW2_ITEM_PULSE_LASER); dw2_ship_start_combat(&m2);
     Dw2Ship f2; foe_ship(&f2); dw2_ship_place(&f2, DW2_ITEM_AETHER_ORE, 2, 0, 0); dw2_ship_start_combat(&f2);
     ticks(&m2, &f2, 1);
-    NEAR(hp(&f2, 2, 1), 15.0f - 10.0f * 0.2f);
+    NEAR(hp(&f2, 2, 1), 15.0f - LASER * 0.2f);
 }
 
 static void test_shield_soaks_first(void) {
@@ -325,7 +330,7 @@ static void test_light_ships_dodge_slugs_but_not_beams(void) {
     Dw2Ship m2; dw2_ship_init(&m2); armed(&m2, 0, DW2_ITEM_PULSE_LASER); dw2_ship_start_combat(&m2);
     Dw2Ship f2; foe_ship(&f2); dw2_ship_start_combat(&f2);
     ticks(&m2, &f2, 6);
-    NEAR(f2.hull_pct, 100.0f - 6 * 10.0f * DW2_HULL_FACTOR);
+    NEAR(f2.hull_pct, 100.0f - 6 * LASER * DW2_HULL_FACTOR);
     /* a heavy ship (40 t) never dodges */
     Dw2Ship heavy; foe_ship(&heavy);
     for (int c = 0; c < 6; c++) dw2_ship_place(&heavy, DW2_ITEM_BULWARK, 5, c, 0);
@@ -466,7 +471,7 @@ static void test_titanium_boosts_touching_weapons(void) {
     CHECK(dw2_weapon_boost(&m2, w) == 1.5f);
     Dw2Ship foe; foe_ship(&foe); dw2_ship_start_combat(&foe);
     ticks(&m2, &foe, 1);
-    NEAR(foe.hull_pct, 100.0f - 15.0f * DW2_HULL_FACTOR);
+    NEAR(foe.hull_pct, 100.0f - LASER * 1.5f * DW2_HULL_FACTOR);
     /* split into Shards and the boost is x1.25 (still there, smaller), a destroyed Beam cell boosts nothing */
     Dw2Ship m3; dw2_ship_init(&m3); w = armed(&m3, 0, DW2_ITEM_PULSE_LASER);
     dw2_ship_place(&m3, DW2_ITEM_TITANIUM_SHARD, 1, 1, 0);
@@ -497,9 +502,9 @@ static void test_simultaneous_volleys(void) {
     Dw2Ship a, b; dw2_ship_init(&a); dw2_ship_init(&b); b.idx = 1;
     int wa = armed(&a, 0, DW2_ITEM_PULSE_LASER), wb = armed(&b, 0, DW2_ITEM_PULSE_LASER);
     dw2_ship_start_combat(&a); dw2_ship_start_combat(&b);
-    for (int t = 0; t < 4; t++) dw2_match_tick(&a, &b, t, NULL);
+    for (int t = 0; t < 5; t++) dw2_match_tick(&a, &b, t, NULL);
     CHECK(wa == wb);
-    /* 35 HP lasers, 10 a shot: 4 volleys each, both at 0 -- 4 x 10 = 40 >= 35 -> both die in the 4th second together */
+    /* 35 HP lasers, 7 a shot: 5 volleys each, both at 0 -- 5 x 7 = 35 >= 35 -> both die in the 5th second together */
     CHECK(a.cell_hp[dw2_cell(0, 1)] == 0.0f && b.cell_hp[dw2_cell(0, 1)] == 0.0f);
     CHECK(a.hull_pct == b.hull_pct);
 }
@@ -635,7 +640,7 @@ static void test_amplifier_lifts_everything_downstream(void) {
     dw2_ship_start_combat(&m2);
     Dw2Ship f2; foe_ship(&f2); dw2_ship_start_combat(&f2);
     ticks(&m2, &f2, 1);                                              /* 22.5 charge: two shots of 10, 2.5 left */
-    NEAR(f2.hull_pct, 100.0f - 2 * 10.0f * DW2_HULL_FACTOR);
+    NEAR(f2.hull_pct, 100.0f - 2 * LASER * DW2_HULL_FACTOR);
 }
 
 static void test_resistors_cut_power(void) {

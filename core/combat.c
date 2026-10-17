@@ -6,8 +6,8 @@ Dw2WeaponStats dw2_weapon_stats(int item_id) {
     Dw2WeaponStats w = { 0.0f, 0.0f, DW2_SHOT_NONE };
     switch (item_id) {
     case DW2_ITEM_RAILGUN:      w.threshold = 30.0f; w.damage = 30.0f; w.kind = DW2_SHOT_RAIL; break;
-    case DW2_ITEM_PULSE_LASER:  w.threshold = 10.0f; w.damage = 10.0f; w.kind = DW2_SHOT_LASER; break;
-    case DW2_ITEM_SIEGE_CANNON: w.threshold = 40.0f; w.damage = 45.0f; w.kind = DW2_SHOT_CANNON; break;
+    case DW2_ITEM_PULSE_LASER:  w.threshold = 10.0f; w.damage = 7.0f;  w.kind = DW2_SHOT_LASER; break;
+    case DW2_ITEM_SIEGE_CANNON: w.threshold = 30.0f; w.damage = 45.0f; w.kind = DW2_SHOT_CANNON; break;
     default: break;
     }
     return w;
@@ -450,10 +450,42 @@ static void dw2_hit_hull(Dw2Ship *t, float raw, int item, int lane, Dw2EventLog 
     dw2_ev(log, DW2_EV_HULL, t->idx, dw2_round(d), dw2_round(t->hull_pct), item, lane, 0);
 }
 
-/* Phase 2 for one ship: its volley lands on the enemy, one lane at a time. */
-static void dw2_ship_resolve(Dw2Ship *self, Dw2Ship *enemy, Dw2EventLog *log) {
+/* One shot of `kind` (DW2_SHOT_*) and `raw` damage, fired by weapon `item`, lands in lane `lane` of `enemy`: what it hits depends on the weapon. (Dodging and a Brace shield
+ * are the caller's: they come before this.) */
+static void dw2_shot_land(Dw2Ship *enemy, int kind, int item, int lane, float raw, Dw2EventLog *log) {
     int8_t eowner[DW2_GRID_CELLS];
     dw2_owner_map(enemy, eowner);
+    if (kind == DW2_SHOT_LASER) {
+        int hit = -1;
+        for (int r = 0; r < DW2_GRID_H; r++) { int c = dw2_cell(r, lane); if (dw2_cell_alive(enemy, c)) { hit = c; break; } }
+        if (hit < 0) dw2_hit_hull(enemy, raw, item, lane, log);
+        else dw2_hit_cell(enemy, hit, raw, dw2_catalog[enemy->placements[eowner[hit]].item_id].x_laser, kind, item, 0, log);
+    } else if (kind == DW2_SHOT_RAIL) {
+        float rem = raw; int stopped = 0;
+        for (int r = 0; r < DW2_GRID_H && !stopped; r++) {
+            int c = dw2_cell(r, lane);
+            if (!dw2_cell_alive(enemy, c)) continue;
+            float left = dw2_hit_cell(enemy, c, rem, dw2_catalog[enemy->placements[eowner[c]].item_id].x_rail, kind, item, 1, log);
+            if (left <= 0.001f) stopped = 1; else rem = left * DW2_RAIL_CARRY;
+        }
+        if (!stopped) dw2_hit_hull(enemy, rem, item, lane, log);
+    } else {
+        int hit = -1;
+        for (int r = DW2_GRID_H - 1; r >= 0; r--) { int c = dw2_cell(r, lane); if (dw2_cell_alive(enemy, c)) { hit = c; break; } }
+        if (hit < 0) dw2_hit_hull(enemy, raw, item, lane, log);
+        else {
+            dw2_hit_cell(enemy, hit, raw, dw2_catalog[enemy->placements[eowner[hit]].item_id].x_cannon, kind, item, 0, log);
+            /* the blast: the parts touching the one that was hit take DW2_CANNON_SPLASH of the shell */
+            for (int k = 0; k < 4; k++) {
+                int n = dw2_nb(hit, k);
+                if (n >= 0 && dw2_cell_alive(enemy, n)) dw2_hit_cell(enemy, n, raw * DW2_CANNON_SPLASH, dw2_catalog[enemy->placements[eowner[n]].item_id].x_cannon, kind, item, 0, log);
+            }
+        }
+    }
+}
+
+/* Phase 2 for one ship: its volley lands on the enemy, one lane at a time. */
+static void dw2_ship_resolve(Dw2Ship *self, Dw2Ship *enemy, Dw2EventLog *log) {
     for (int p = 0; p < self->placement_n; p++) {
         if (self->placements[p].item_id < 0 || self->shots[p] <= 0) continue;
         int item = self->placements[p].item_id;
@@ -473,34 +505,27 @@ static void dw2_ship_resolve(Dw2Ship *self, Dw2Ship *enemy, Dw2EventLog *log) {
                 dw2_ev(log, DW2_EV_SHIELD, enemy->idx, dw2_round(ab), dw2_round(enemy->shield), item, lane, 0);
                 if (raw <= 0.001f) continue;
             }
-            if (ws.kind == DW2_SHOT_LASER) {
-                int hit = -1;
-                for (int r = 0; r < DW2_GRID_H; r++) { int c = dw2_cell(r, lane); if (dw2_cell_alive(enemy, c)) { hit = c; break; } }
-                if (hit < 0) dw2_hit_hull(enemy, raw, item, lane, log);
-                else dw2_hit_cell(enemy, hit, raw, dw2_catalog[enemy->placements[eowner[hit]].item_id].x_laser, ws.kind, item, 0, log);
-            } else if (ws.kind == DW2_SHOT_RAIL) {
-                float rem = raw; int stopped = 0;
-                for (int r = 0; r < DW2_GRID_H && !stopped; r++) {
-                    int c = dw2_cell(r, lane);
-                    if (!dw2_cell_alive(enemy, c)) continue;
-                    float left = dw2_hit_cell(enemy, c, rem, dw2_catalog[enemy->placements[eowner[c]].item_id].x_rail, ws.kind, item, 1, log);
-                    if (left <= 0.001f) stopped = 1; else rem = left * DW2_RAIL_CARRY;
-                }
-                if (!stopped) dw2_hit_hull(enemy, rem, item, lane, log);
-            } else {
-                int hit = -1;
-                for (int r = DW2_GRID_H - 1; r >= 0; r--) { int c = dw2_cell(r, lane); if (dw2_cell_alive(enemy, c)) { hit = c; break; } }
-                if (hit < 0) dw2_hit_hull(enemy, raw, item, lane, log);
-                else {
-                    dw2_hit_cell(enemy, hit, raw, dw2_catalog[enemy->placements[eowner[hit]].item_id].x_cannon, ws.kind, item, 0, log);
-                    /* the blast: the parts touching the one that was hit take DW2_CANNON_SPLASH of the shell */
-                    for (int k = 0; k < 4; k++) {
-                        int n = dw2_nb(hit, k);
-                        if (n >= 0 && dw2_cell_alive(enemy, n)) dw2_hit_cell(enemy, n, raw * DW2_CANNON_SPLASH, dw2_catalog[enemy->placements[eowner[n]].item_id].x_cannon, ws.kind, item, 0, log);
-                    }
-                }
-            }
+            dw2_shot_land(enemy, ws.kind, item, lane, raw, log);
         }
+    }
+}
+
+/* How many shots of `kind` it takes to destroy everything standing in lane `lane` of the ship, with nothing else about the ship in play (every other cell is taken out,
+ * so a shell's splash cannot reach another lane; no shield, no dodging). 0 = the lane is already empty; DW2_LANE_SHOTS_MAX = it would take at least that many. */
+int dw2_lane_shots_to_open(const Dw2Ship *s, int lane, int kind) {
+    Dw2Ship c = *s;
+    c.shield = 0.0f; c.evade_pct = 0.0f; c.evade_acc = 0.0f; c.hull_pct = 100.0f;
+    for (int i = 0; i < DW2_GRID_CELLS; i++) if (i % DW2_GRID_W != lane) { c.dead |= dw2_bit(i); c.cell_hp[i] = 0.0f; }
+    float raw = kind == DW2_SHOT_LASER ? dw2_weapon_stats(DW2_ITEM_PULSE_LASER).damage : kind == DW2_SHOT_RAIL ? dw2_weapon_stats(DW2_ITEM_RAILGUN).damage : dw2_weapon_stats(DW2_ITEM_SIEGE_CANNON).damage;
+    int item = kind == DW2_SHOT_LASER ? DW2_ITEM_PULSE_LASER : kind == DW2_SHOT_RAIL ? DW2_ITEM_RAILGUN : DW2_ITEM_SIEGE_CANNON;
+    int shots = 0;
+    for (;;) {
+        int alive = 0;
+        for (int r = 0; r < DW2_GRID_H; r++) if (dw2_cell_alive(&c, dw2_cell(r, lane))) alive++;
+        if (!alive) return shots;
+        if (shots >= DW2_LANE_SHOTS_MAX) return shots;
+        dw2_shot_land(&c, kind, item, lane, raw, NULL);
+        shots++;
     }
 }
 

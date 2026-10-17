@@ -108,6 +108,38 @@ static int same(const Lo *a, const Lo *b) {
     return sa.grid.occupied == sb.grid.occupied && sa.cost == sb.cost && sa.placement_n == sb.placement_n;
 }
 
+/* The strategies a person reaches for, drawn as in tools/dw2_trace.c (a letter and a rotation digit per cell; only the anchor of a part is written). Every candidate is
+ * also scored against these, so the pool cannot be a set of ships that only know how to beat each other: a row of lasers on generators, a Titanium wall with railguns
+ * behind it, a cannon behind plates, an Aether wall. */
+static const char *ARCH[] = {
+    "L3L3L3L3....\nG3G3G3G3....\nB0B0........\n............\n............\n............\n",
+    "L3L3L3......\nG3G3G3......\nB0B0B0......\n............\n............\n............\n",
+    "............\n......B0....\nT0..........\nG0R0G0R0....\n............\n............\n",
+    "............\n............\n............\nG0C0G0..B0B0\nB0B0B0......\n............\n",
+    "O0..O0......\n............\n............\nG0R0G0R0....\n............\n............\n",
+    "B0B0B0B0B0..\n............\nG0R0........\nG0R0........\n............\n............\n",
+    "............\n..L3..L3......\n..G3..G3......\nB0B0B0B0....\nG0C0........\n............\n",
+    "............\n............\n............\nG0C0--......\n....G0C0--..\n....B0B0....\n",
+    "............\n............\n............\nG0C0--..G0R0\nB0B0B0B0....\n............\n",
+    "..B0..B0....\n............\n............\nG0C0--......\n....G0C0--..\n............\n",
+    "..B0..B0....\n............\n..B0..B0....\nG0C0--......\n....G0C0--..\n............\n",
+};
+#define NARCH ((int)(sizeof ARCH / sizeof ARCH[0]))
+static Lo archetype[NARCH];
+static void parse_arch(void) {
+    static const char *LET = "GcsRBTOLCAME124PYXDQVNto";
+    for (int k = 0; k < NARCH; k++) {
+        Lo *l = &archetype[k]; memset(l, 0, sizeof *l);
+        int row = 0, col = 0;
+        for (const char *p = ARCH[k]; *p; ) {
+            if (*p == '\n') { row++; col = 0; p++; continue; }
+            char a = p[0], b = p[1]; p += 2;
+            if (a != '.' && a != '-') { const char *q = strchr(LET, a); l->op[l->n].item = (int)(q - LET); l->op[l->n].row = row; l->op[l->n].col = col; l->op[l->n].rot = b - '0'; l->n++; }
+            col++;
+        }
+    }
+}
+
 /* what a ship is built around: the weapon kind it spends the most credits on (0 = none, 1 laser, 2 rail, 3 cannon) */
 static const char *fam_name[4] = { "no-gun", "laser", "rail", "cannon" };
 static int dominant(Lo *lo) {
@@ -120,15 +152,30 @@ static int dominant(Lo *lo) {
 }
 
 int main(int argc, char **argv) {
-    int gens = 80, pop = 160, seed = 7, survey = 0; const char *out = "apps/bot/loadouts.h";
+    int gens = 80, pop = 160, seed = 7, survey = 0, archmode = 0; const char *out = "apps/bot/loadouts.h";
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--gens") && i + 1 < argc) gens = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--pop") && i + 1 < argc) pop = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--out") && i + 1 < argc) out = argv[++i];
         else if (!strcmp(argv[i], "--survey")) survey = 1;
+        else if (!strcmp(argv[i], "--archetypes")) archmode = 1;
     }
     rs ^= (uint64_t)seed * 0x9E3779B97F4A7C15ull;
+    parse_arch();
+    if (archmode) {
+        /* the hand-drawn strategies against each other: row's win rate against column (1 win, 0.5 draw) */
+        fprintf(stderr, "archetype round robin (row wins vs column):\n    ");
+        for (int j = 0; j < NARCH; j++) fprintf(stderr, " %4d", j);
+        fprintf(stderr, "\n");
+        for (int i = 0; i < NARCH; i++) {
+            Dw2Ship sh; Lo l = archetype[i]; build(&l, &sh);
+            fprintf(stderr, "%2d (%4d cr %2d t)", i, sh.cost, sh.weight);
+            for (int j = 0; j < NARCH; j++) { if (i == j) { fprintf(stderr, "    -"); continue; } double d = duel(&archetype[i], &archetype[j], NULL); fprintf(stderr, " %4.1f", d >= 1.0 ? 1.0 : d >= 0.5 ? 0.5 : 0.0); }
+            fprintf(stderr, "\n");
+        }
+        return 0;
+    }
     /* three species (laser-only, rail-only, cannon-only ships) breed apart but are scored against all of them, so no family can crowd the others out */
     int S = 3, per = pop / S; pop = per * S;
     Lo *P = calloc((size_t)pop, sizeof *P), *H = calloc(64, sizeof *H); int hn = 0;
@@ -137,7 +184,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < pop; i++) {
             double sum = 0; int games = 30;
             for (int k = 0; k < games; k++) {
-                const Lo *o = (hn && k % 3 == 0) ? &H[rn(hn)] : &P[rn(pop)];
+                const Lo *o = (k % 5 == 1) ? &archetype[rn(NARCH)] : (hn && k % 3 == 0) ? &H[rn(hn)] : &P[rn(pop)];
                 sum += duel(&P[i], o, NULL);
             }
             P[i].fit = sum / games;
@@ -176,6 +223,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "win rate of ROW family vs COLUMN family (finalists):\n          "); for (int k = 0; k < 4; k++) fprintf(stderr, "%8s", fam[k]); fprintf(stderr, "\n");
         for (int a2 = 0; a2 < 4; a2++) { fprintf(stderr, "%-10s", fam[a2]); for (int b2 = 0; b2 < 4; b2++) { if (N[a2][b2]) fprintf(stderr, "%8.2f", M[a2][b2] / N[a2][b2]); else fprintf(stderr, "%8s", "-"); } fprintf(stderr, "\n"); }
         fprintf(stderr, "average match %.1f ticks; %.0f%% ended before the clock\n", (double)ticks_sum / ticks_n, 100.0 * wins_by_hull / ticks_n);
+        fprintf(stderr, "the archetypes against the finalists (their win rate):\n");
+        for (int k = 0; k < NARCH; k++) { double w = 0; for (int j = 0; j < fn; j++) { double d = duel(&archetype[k], &F[j], NULL); w += d >= 1.0 ? 1.0 : d >= 0.5 ? 0.5 : 0.0; } fprintf(stderr, "  archetype %d: %.2f\n", k, w / fn); }
         static const char *LET = "GcsRBTOLCAME124PYXDQVNto";
         for (int b = 0; b < 4; b++) {
             Dw2Ship s; Lo l = F[b]; build(&l, &s);
@@ -193,16 +242,27 @@ int main(int argc, char **argv) {
             for (int r = 0; r < 6; r++) { for (int c = 0; c < 6; c++) fprintf(stderr, "%s", g[r][c]); fprintf(stderr, "\n"); }
         }
     }
-    /* the pool: the best few ships of each weapon family, so the opponents a player meets are varied, not one meta ship twelve times */
-    Lo pool[24]; int want = 0;
-    for (int fam = 1; fam <= 3; fam++) {
-        int got = 0;
-        for (int i = 0; i < fn && got < 4; i++) {
+    /* the pool: the human strategies drawn above that make a good opponent (each beats some and loses to others: see --archetypes), then the best evolved ships --
+     * the ones that do best against the archetypes as well as each other -- so a player meets variety, and every opponent has a counter they can build */
+    static const int POOL_ARCH[] = { 0, 1, 2, 4, 7, 8, 9 };
+    Lo pool[24]; int want = 0; int is_arch[24] = {0};
+    for (int k = 0; k < (int)(sizeof POOL_ARCH / sizeof POOL_ARCH[0]); k++) { pool[want] = archetype[POOL_ARCH[k]]; is_arch[want] = 1 + POOL_ARCH[k]; want++; }
+    for (int i = 0; i < fn; i++) {      /* a finalist's own score plus its win rate against the archetypes */
+        double w = 0; for (int k = 0; k < NARCH; k++) { double d = duel(&F[i], &archetype[k], NULL); w += d >= 1.0 ? 1.0 : d >= 0.5 ? 0.5 : 0.0; }
+        F[i].fit = F[i].fit + w / NARCH;
+    }
+    qsort(F, (size_t)fn, sizeof *F, cmp_fit);
+    for (int fam = 1; fam <= 3 && want < 12; fam++) {
+        for (int i = 0; i < fn; i++) {
             if (dominant(&F[i]) != fam) continue;
             int dup = 0; for (int j = 0; j < want; j++) if (same(&F[i], &pool[j])) dup = 1;
             if (dup) continue;
-            pool[want++] = F[i]; got++;
+            pool[want++] = F[i]; break;
         }
+    }
+    for (int i = 0; i < fn && want < 12; i++) {
+        int dup = 0; for (int j = 0; j < want; j++) if (same(&F[i], &pool[j])) dup = 1;
+        if (!dup) pool[want++] = F[i];
     }
     FILE *f = fopen(out, "w");
     if (!f) { perror(out); return 1; }
@@ -216,7 +276,8 @@ int main(int argc, char **argv) {
         Dw2Ship s; Lo l = pool[i]; build(&l, &s);
         fprintf(f, "    { %d, { ", l.n);
         for (int k = 0; k < l.n; k++) fprintf(f, "{%d,%d,%d,%d}%s", l.op[k].item, l.op[k].row, l.op[k].col, l.op[k].rot, k + 1 < l.n ? ", " : "");
-        fprintf(f, " } }, /* %s, round-robin score %.3f, %d credits %d t */\n", fam_name[dominant(&pool[i])], pool[i].fit, s.cost, s.weight);
+        if (is_arch[i]) fprintf(f, " } }, /* %s, strategy %d, %d credits %d t */\n", fam_name[dominant(&pool[i])], is_arch[i] - 1, s.cost, s.weight);
+        else fprintf(f, " } }, /* %s, evolved, score %.3f, %d credits %d t */\n", fam_name[dominant(&pool[i])], pool[i].fit, s.cost, s.weight);
     }
     fprintf(f, "};\n#define DW2_BOT_LOADOUT_COUNT %d\n#endif\n", want);
     fclose(f);

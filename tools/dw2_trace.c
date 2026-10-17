@@ -30,6 +30,7 @@ static const char *arch(const char *name) {
     return NULL;
 }
 
+static int g_ops = 0;
 static int load(const char *spec, Dw2Ship *s) {
     char buf[1024]; const char *txt = arch(spec);
     if (!txt) {
@@ -46,6 +47,7 @@ static int load(const char *spec, Dw2Ship *s) {
             int item = letter_item(a);
             if (item < 0) { fprintf(stderr, "bad cell %c%c at %d,%d\n", a, b, row, col); return -1; }
             if (dw2_ship_place(s, item, row, col, b - '0') < 0) fprintf(stderr, "%s: cannot place %s at %d,%d (budget or overlap)\n", spec, dw2_catalog[item].name, row, col);
+            else if (g_ops) printf("%d,%d,%d,%d ", item, row, col, b - '0');
         }
         col++;
     }
@@ -59,6 +61,12 @@ static void show(const Dw2Ship *s, const char *title) {
 int main(int argc, char **argv) {
     if (argc < 3) { fprintf(stderr, "usage: dw2_trace A B [-q]\n"); return 2; }
     int quiet = argc > 3 && !strcmp(argv[3], "-q");
+    if (argc > 3 && !strcmp(argv[3], "--ops")) {   /* print the ship as the ops the web client's EXAMPLE button stores, and its cost and weight */
+        Dw2Ship a; g_ops = 1;
+        if (load(argv[1], &a)) return 1;
+        printf("\n# %s: %d credits, %d t, %d parts\n", argv[1], a.cost, a.weight, a.placement_n);
+        return 0;
+    }
     Dw2Ship a, b;
     if (load(argv[1], &a) || load(argv[2], &b)) return 1;
     b.idx = 1;

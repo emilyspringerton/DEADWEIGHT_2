@@ -148,5 +148,8 @@ float dw2_cell_mult(const Dw2Ship *s, int cell, int kind);
 /* The weapon boost a weapon placement gets from the Titanium it touches (1.0 if none), and the repair boost an Aegis cell gets from touching Aether. */
 float dw2_weapon_boost(const Dw2Ship *s, int placement);
 float dw2_aegis_boost(const Dw2Ship *s, int cell);
+/* How many shots of a weapon kind (DW2_SHOT_*) it takes to destroy everything standing in a lane (the pack screen's "shots to open" table). */
+#define DW2_LANE_SHOTS_MAX 60
+int dw2_lane_shots_to_open(const Dw2Ship *s, int lane, int kind);
 
 #endif
