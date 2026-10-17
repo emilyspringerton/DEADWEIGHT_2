@@ -62,6 +62,12 @@ remains a real, named future phase in `NORTHSTAR.md`'s "Deferred" section.
   FIFO queue — no separate matchmaker binary; see `NORTHSTAR.md`'s D2 section for why).
 - `apps/client/main.c` — `dw2_client`, the D2 real interactive client (connect/queue/pack/fight
   over the actual wire protocol; `--selftest` drives the same real code paths headlessly).
+- `apps/bot/main.c` + `apps/bot/loadouts.h` -- `dw2_bot`, the bot pool (D4): kind=BOT protocol clients; ships from `loadouts.h`, **generated** by `tools/dw2_loadout_search.c` (a
+  co-evolved search over the real combat core; regenerate when the catalog or the rules change; `tests/test_bot_loadouts.c` fails the build if one stops being legal). Runs as a
+  second container in the deadweight2 pod (`EMILY/gitops/specs/deadweight2.pod`).
+- `tools/dw2_ref_dump.c` -- what the real combat core does with a set of ships, tick by tick; `PARENA/scripts/d2_rules_parity.sh` uses it to check the web client's port of the ship rules.
+- **The browser client** lives in other repos: `PARENA/stdlib/d2/web/` (the wasm client + generated page host), `WOTAN/d2/` (the pages), `IDUNA/internal/d2play` (the WebSocket gateway that
+  introduces players to this `--no-auth` server by name and records their matches). If this server is ever given IDUNA agent credentials it would report too: turn the gateway's recording off first.
 - `tools/dw2_test_client.c` — scripted headless test tool for exercising `dw2_server`'s protocol
   edge cases (reject paths, pack-deadline force-start, forfeit); not a real client.
 - `tools/dw2_cannon_demo.c` — standalone proof that a second, real LO decision program
