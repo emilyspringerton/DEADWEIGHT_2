@@ -141,6 +141,33 @@ grep -q "^MATCH_END result=1 reason=0" build/dw2_client_a.log || { echo "D2 clie
 grep -q "^MATCH_END result=0 reason=0" build/dw2_client_b.log || { echo "D2 client smoke test FAILED: expected dw2_client B (empty grid) to lose on hull, see build/dw2_client_b.log"; cat build/dw2_client_b.log; exit 1; }
 echo "dw2_client smoke test: a real interactive-client-shaped binary completed a full match over the actual wire protocol"
 
+echo "== D2: dw2_bot (the bot pool) + a human-vs-bot match over the real wire protocol (ASan+UBSan) =="
+# The bots are protocol clients (kind=BOT) of the same dw2_server: pairing is the server's own rule (a human always gets the
+# oldest waiting bot). tools/dw2_loadout_search.c generated apps/bot/loadouts.h from the real combat core; the first run here
+# also re-checks that every committed loadout is legal against that core, so a rules change can't leave the bot a broken ship.
+gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+    apps/bot/main.c core/protocol.c -o build/dw2_bot
+gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+    tests/test_bot_loadouts.c core/items.c core/combat.c core/round.c $CANNON_SRC -o build/test_bot_loadouts
+./build/test_bot_loadouts
+DW2_TEST_PORT4=17803
+./build/dw2_server --port "$DW2_TEST_PORT4" --no-auth --fast-forward --pack-ms 6000 --tick-ms 20 --verbose \
+    > build/dw2_server_bot_smoketest.log 2>&1 &
+DW2_SRV4_PID=$!
+trap 'kill "$DW2_SRV4_PID" "${DW2_BOT_PID:-}" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$DW2_TEST_PORT4 " && break; sleep 0.1; done
+./build/dw2_bot --port "$DW2_TEST_PORT4" --count 2 --verbose > build/dw2_bot.log 2>&1 &
+DW2_BOT_PID=$!
+sleep 1
+# a human with a real loadout is paired with the oldest waiting bot and a full match resolves
+./build/dw2_test_client --port "$DW2_TEST_PORT4" --name HumanVsBot --timeout-ms 30000 \
+    --place 0,0,0,0 --place 1,0,1,0 --place 3,0,2,0 --place 4,3,3,0 > build/dw2_human_vs_bot.log
+kill "$DW2_BOT_PID" "$DW2_SRV4_PID" 2>/dev/null || true; trap - EXIT
+grep -q "^MATCH_FOUND .* opp=.* Bot pack_ms" build/dw2_human_vs_bot.log || { echo "bot smoke test FAILED: the human was not paired with a bot, see build/dw2_human_vs_bot.log"; cat build/dw2_human_vs_bot.log; exit 1; }
+grep -q "^MATCH_END" build/dw2_human_vs_bot.log || { echo "bot smoke test FAILED: no MATCH_END, see build/dw2_human_vs_bot.log"; cat build/dw2_human_vs_bot.log; exit 1; }
+grep -q "round [0-9]*: \(overcharge\|brace\)" build/dw2_bot.log || { echo "bot smoke test FAILED: the bot never played a round break"; cat build/dw2_bot.log; exit 1; }
+echo "dw2_bot smoke test: a human was paired with a bot and the match resolved; the bot played its round breaks"
+
 echo "== D2: cannon programming -- HOLD branch, live dw2_ship_tick integration (ASan+UBSan) =="
 # Standalone from test_core_loop: only one compiled LO decision program can be linked into a given
 # binary at a time (both cannon/*_gen.c files define the real `lo_program` symbol) -- this binary
