@@ -130,9 +130,9 @@ for _ in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$DW2_TEST_PORT2 " && br
 # a round-break (see apps/client/main.c's own comment), same neutral no-op default as the smoke
 # test above, so the 21-tick result is unaffected; --timeout-ms bumped for the same real added
 # round-break wall-clock time (DW2_ROUND_BUDGET_MS x 4 breaks before tick 21).
-./build/dw2_client --port "$DW2_TEST_PORT2" --name ClientA --selftest --timeout-ms 20000 > build/dw2_client_a.log &
+./build/dw2_client --host 127.0.0.1 --port "$DW2_TEST_PORT2" --name ClientA --selftest --timeout-ms 20000 > build/dw2_client_a.log &
 CLIENT2_A_PID=$!
-./build/dw2_client --port "$DW2_TEST_PORT2" --name ClientB --selftest --empty-grid --timeout-ms 20000 > build/dw2_client_b.log &
+./build/dw2_client --host 127.0.0.1 --port "$DW2_TEST_PORT2" --name ClientB --selftest --empty-grid --timeout-ms 20000 > build/dw2_client_b.log &
 CLIENT2_B_PID=$!
 wait "$CLIENT2_A_PID"; wait "$CLIENT2_B_PID"
 kill "$DW2_SRV2_PID" 2>/dev/null || true; trap - EXIT
