@@ -254,6 +254,8 @@ static void handle_server_msg(const Dw2WireMsg *m) {
         printf("TICK t=%u hull=%u/%u armor=%u/%u shatter=%u/%u\n", m->u.tick.elapsed_ticks, m->u.tick.hull_you, m->u.tick.hull_opp,
                m->u.tick.armor_you, m->u.tick.armor_opp, m->u.tick.shatter_you, m->u.tick.shatter_opp);
         break;
+    case DW2_S_OPP_SHIP: printf("OPP_SHIP n=%u (the opponent's ship; this debug client does not draw it)\n", m->u.opp_ship.n); break;
+    case DW2_S_OPP_CUT: printf("OPP_CUT idx=%u\n", m->u.opp_cut.placement_idx); break;
     case DW2_S_MATCH_END:
         match_result = m->u.match_end.result; match_reason = m->u.match_end.reason; match_ticks = m->u.match_end.ticks;
         printf("MATCH_END result=%u reason=%u ticks=%u\n", match_result, match_reason, match_ticks);

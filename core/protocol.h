@@ -39,6 +39,7 @@ enum {
     DW2_S_PLACE_REJECT = 0x85, DW2_S_CUT_ACK = 0x86, DW2_S_CUT_REJECT = 0x87,
     DW2_S_COMBAT_START = 0x88, DW2_S_TICK = 0x89, DW2_S_MATCH_END = 0x8A, DW2_S_PONG = 0x8B,
     DW2_S_ROUND_BREAK = 0x8C, DW2_S_ROUND_RESULT = 0x8D,
+    DW2_S_OPP_SHIP = 0x90, DW2_S_OPP_CUT = 0x91,
     DW2_S_ERROR = 0x8F
 };
 enum { DW2_KIND_HUMAN = 0, DW2_KIND_BOT = 1 };
@@ -83,6 +84,12 @@ typedef struct {
          * mult, 75 = 1.5 mult, 50 = neutral) UNLESS grade==MISS, in which case it's the self-damage
          * hull% backfire instead; BRACE -> the flat armor bonus added, 0 on MISS/NONE. */
         struct { uint8_t your_call, your_grade, your_effect, opp_call, opp_grade, opp_effect; } round_result;
+        /* OPP_SHIP: sent once, right after COMBAT_START, to each side: the opponent's packed ship. Packing is secret; the fight is not.
+         * n placements in index order (so OPP_CUT's index means the same slot), then unused slots with item 255. A placement's cut
+         * flag is set if it was cut during packing. Fixed size so old decoders need only learn the type. */
+        struct { uint8_t n; struct { uint8_t item, row, col, rot, cut; } p[16]; } opp_ship;
+        /* OPP_CUT: the opponent Panic-Cut placement `placement_idx` during the fight (the server accepted it). */
+        struct { uint8_t placement_idx; } opp_cut;
         struct { uint8_t code; } error;
     } u;
 } Dw2WireMsg;

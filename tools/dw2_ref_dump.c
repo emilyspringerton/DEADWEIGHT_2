@@ -3,7 +3,8 @@
  *
  * For each ship (the bot pool's, then N random legal layouts): the ops, then for each of 30 ticks the shots the ship fired, the
  * Back-EMF meltdowns so far and the mask of burned cells. The enemy is a ship with an enormous armor so every shot is counted
- * (a shot is 15 damage to it) and nothing ends the fight early.
+ * (a shot is 15 damage to it) and nothing ends the fight early. Damage is read off both the enemy's armor and its hull (a Pulse Laser skips
+ * the armor), and the ship under test starts at 40 hull and 0 armor so the Mender's and the Aegis Emitter's work shows.
  *
  * The second batch is dense wiring (generators, conductors, splitters and weapons in a small corner), which is where closed loops and
  * Back-EMF meltdowns come from; uniformly random ships almost never have one.
@@ -18,7 +19,7 @@ static uint64_t rs = 0x9E3779B97F4A7C15ull;
 static uint32_t rnd(void) { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return (uint32_t)(rs >> 11); }
 
 /* splitters make rings; a ring is a closed loop and (after a few ticks) a meltdown */
-static const int dense_pool[8] = { 0, 2, 2, 2, 2, 1, 3, 2 };
+static const int dense_pool[16] = { 0, 0, 2, 2, 2, 2, 1, 1, 9, 9, 3, 7, 8, 10, 11, 2 };
 
 static void dump(int idx, const Dw2BotLoadout *lo) {
     Dw2Ship me, foe;
@@ -34,14 +35,15 @@ static void dump(int idx, const Dw2BotLoadout *lo) {
     for (int k = 0; k < pn; k++) printf(" %d,%d,%d,%d,%d", placed[k][0], placed[k][1], placed[k][2], placed[k][3], placed[k][4]);
     printf("\n");
     dw2_ship_start_combat(&me); dw2_ship_start_combat(&foe);
-    foe.armor = 1000000.0f;
+    foe.armor = 1000000.0f; foe.hull_pct = 1000000.0f;
     printf("A %d %d\n", (int)me.armor, me.cargo_value);
+    me.hull_pct = 40.0f; me.armor = 0.0f;
     for (int t = 1; t <= 30; t++) {
-        float before = foe.armor;
+        float ba = foe.armor, bh = foe.hull_pct;
         dw2_ship_tick(&me, &foe);
-        int shots = (int)((before - foe.armor) / 15.0f + 0.5f);
+        int dmg = (int)((ba - foe.armor) + (bh - foe.hull_pct) + 0.5f);
         unsigned long long burned = (unsigned long long)me.burned;
-        printf("T %d %d %d %llx\n", t, shots, me.shatter_events, burned);
+        printf("T %d %d %d %llx %d %d\n", t, dmg, me.shatter_events, burned, (int)(me.hull_pct + 0.5f), (int)(me.armor + 0.5f));
     }
 }
 
@@ -58,7 +60,7 @@ int main(int argc, char **argv) {
         Dw2BotLoadout lo; lo.n = 0;
         int tries = 20 + (int)(rnd() % 40);
         for (int k = 0; k < tries && lo.n < 16; k++) {
-            Dw2BotOp o = d ? (Dw2BotOp){ dense_pool[rnd() % 8], (int)(rnd() % 3), (int)(rnd() % 3), (int)(rnd() % 4), 0 }
+            Dw2BotOp o = d ? (Dw2BotOp){ dense_pool[rnd() % 16], (int)(rnd() % 3), (int)(rnd() % 3), (int)(rnd() % 4), 0 }
                            : (Dw2BotOp){ (int)(rnd() % DW2_ITEM_COUNT), (int)(rnd() % 6), (int)(rnd() % 6), (int)(rnd() % 4), (rnd() % 3) == 0 };
             Dw2Ship t; dw2_ship_init(&t);
             int ok = 1;

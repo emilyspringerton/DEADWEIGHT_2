@@ -6,6 +6,8 @@
 #include "../core/dummy.h"
 #include "../core/round.h"
 #include "../core/cannon.h"
+#include "../core/protocol.h"
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -359,6 +361,101 @@ static void test_cannon_decide_always_fires(void) {
     CHECK(dw2_cannon_decide(1, 1) == DW2_CANNON_FIRE);
 }
 
+/* ---- the second catalog: Pulse Laser, Siege Cannon, Amplifier, Mender, Aegis Emitter ----------------------------------------------- */
+static void fight_ticks(Dw2Ship *me, Dw2Ship *foe, int n) { for (int t = 0; t < n; t++) dw2_ship_tick(me, foe); }
+static void big_foe(Dw2Ship *foe) { dw2_ship_init(foe); foe->hull_pct = 1000.0f; foe->armor = 500.0f; }
+
+static void test_pulse_laser_pierces_armor(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0) == 0);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_PULSE_LASER, 0, 1, 0) == 1);   /* a laser right beside the generator's east port */
+    dw2_ship_start_combat(&me);
+    fight_ticks(&me, &foe, 4);
+    CHECK(foe.armor == 500.0f);                 /* armor never touched */
+    CHECK(foe.hull_pct == 1000.0f - 4 * 3.0f);  /* 3 hull a tick, every tick */
+}
+
+static void test_siege_cannon_fires_every_fifth_second(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0) == 0);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_SIEGE_CANNON, 0, 1, 0) == 1);  /* weapon cell at (0,1), barrel at (0,2) */
+    CHECK(me.placements[1].cell_n == 2);
+    dw2_ship_start_combat(&me);
+    fight_ticks(&me, &foe, 4);
+    CHECK(foe.armor == 500.0f);
+    dw2_ship_tick(&me, &foe);                   /* second 5: 50 energy */
+    CHECK(foe.armor == 470.0f);                 /* 30 damage, absorbed by armor */
+    fight_ticks(&me, &foe, 5);
+    CHECK(foe.armor == 440.0f);                 /* and again at second 10 */
+    CHECK(foe.hull_pct == 1000.0f);
+}
+
+static void test_amplifier_lifts_everything_downstream(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0) == 0);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_AMPLIFIER, 0, 1, 0) == 1);
+    CHECK(dw2_ship_place(&me, DW2_ITEM_RAILGUN, 0, 2, 0) == 2);
+    dw2_ship_start_combat(&me);
+    dw2_ship_tick(&me, &foe);
+    CHECK(me.weapon_charge[2] == 15.0f);        /* 10 x 1.5 */
+    dw2_ship_tick(&me, &foe);                   /* 30 at second 2 instead of second 3 */
+    CHECK(foe.armor == 485.0f);
+    /* two in a row: x2.25, a Pulse Laser behind them fires twice a second */
+    Dw2Ship m2, f2; dw2_ship_init(&m2); big_foe(&f2);
+    dw2_ship_place(&m2, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&m2, DW2_ITEM_AMPLIFIER, 0, 1, 0);
+    dw2_ship_place(&m2, DW2_ITEM_AMPLIFIER, 0, 2, 0); dw2_ship_place(&m2, DW2_ITEM_PULSE_LASER, 0, 3, 0);
+    dw2_ship_start_combat(&m2);
+    dw2_ship_tick(&m2, &f2);                    /* 22.5 charge: two shots of 3, 2.5 left */
+    CHECK(f2.hull_pct == 1000.0f - 6.0f);
+}
+
+static void test_mender_heals_and_caps(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&me, DW2_ITEM_MENDER, 0, 1, 0);
+    dw2_ship_start_combat(&me);
+    me.hull_pct = 50.0f;
+    fight_ticks(&me, &foe, 3);
+    CHECK(me.hull_pct == 56.0f);
+    me.hull_pct = 99.0f;
+    dw2_ship_tick(&me, &foe);
+    CHECK(me.hull_pct == 100.0f);               /* never past 100 */
+    /* an unfed Mender does nothing */
+    Dw2Ship m2; dw2_ship_init(&m2); dw2_ship_place(&m2, DW2_ITEM_MENDER, 3, 3, 0); dw2_ship_start_combat(&m2);
+    m2.hull_pct = 50.0f; dw2_ship_tick(&m2, &foe);
+    CHECK(m2.hull_pct == 50.0f);
+}
+
+static void test_aegis_recharges_to_its_starting_armor(void) {
+    Dw2Ship me, foe; dw2_ship_init(&me); big_foe(&foe);
+    dw2_ship_place(&me, DW2_ITEM_GENERATOR, 0, 0, 0); dw2_ship_place(&me, DW2_ITEM_AEGIS, 0, 1, 0);
+    dw2_ship_place(&me, DW2_ITEM_BULWARK, 3, 3, 0);
+    dw2_ship_start_combat(&me);
+    CHECK(me.armor == 20.0f && me.armor_max == 20.0f);
+    me.armor = 5.0f;
+    dw2_ship_tick(&me, &foe); CHECK(me.armor == 8.0f);
+    fight_ticks(&me, &foe, 10); CHECK(me.armor == 20.0f);     /* stops at the armor it started with */
+    /* a Panic Cut's dead squares raise the line */
+    Dw2Ship m2; dw2_ship_init(&m2);
+    dw2_ship_place(&m2, DW2_ITEM_TITANIUM_BEAM, 0, 0, 0); dw2_ship_start_combat(&m2);
+    CHECK(dw2_ship_panic_cut(&m2, 0) == 1);
+    CHECK(m2.armor == 16.0f && m2.armor_max == 16.0f);
+}
+
+static void test_opp_ship_frames_roundtrip(void) {
+    Dw2WireMsg m, d; memset(&m, 0, sizeof m); m.type = DW2_S_OPP_SHIP; m.u.opp_ship.n = 2;
+    for (int i = 0; i < 16; i++) m.u.opp_ship.p[i].item = 255;
+    m.u.opp_ship.p[0].item = 3; m.u.opp_ship.p[0].row = 1; m.u.opp_ship.p[0].col = 2; m.u.opp_ship.p[0].rot = 3; m.u.opp_ship.p[0].cut = 0;
+    m.u.opp_ship.p[1].item = 5; m.u.opp_ship.p[1].row = 4; m.u.opp_ship.p[1].col = 0; m.u.opp_ship.p[1].rot = 1; m.u.opp_ship.p[1].cut = 1;
+    uint8_t buf[256]; size_t used = 0;
+    int n = dw2_encode(&m, buf, sizeof buf);
+    CHECK(n == 2 + 1 + 81);
+    CHECK(dw2_decode(buf, (size_t)n, &d, &used) == 1 && used == (size_t)n);
+    CHECK(d.type == DW2_S_OPP_SHIP && d.u.opp_ship.n == 2 && d.u.opp_ship.p[1].item == 5 && d.u.opp_ship.p[1].cut == 1 && d.u.opp_ship.p[15].item == 255);
+    memset(&m, 0, sizeof m); m.type = DW2_S_OPP_CUT; m.u.opp_cut.placement_idx = 7;
+    n = dw2_encode(&m, buf, sizeof buf);
+    CHECK(n == 4 && dw2_decode(buf, (size_t)n, &d, &used) == 1 && d.u.opp_cut.placement_idx == 7);
+}
+
 int main(void) {
     test_placement_legality();
     test_rotation_math();
@@ -378,6 +475,12 @@ int main(void) {
     test_round_apply_effect();
     test_dmg_mult_scales_damage();
     test_cannon_decide_always_fires();
+    test_pulse_laser_pierces_armor();
+    test_siege_cannon_fires_every_fifth_second();
+    test_amplifier_lifts_everything_downstream();
+    test_mender_heals_and_caps();
+    test_aegis_recharges_to_its_starting_armor();
+    test_opp_ship_frames_roundtrip();
     printf("test_core_loop: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

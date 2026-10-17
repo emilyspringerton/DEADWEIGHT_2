@@ -2,6 +2,17 @@
 #include "cannon.h"
 #include <string.h>
 
+Dw2WeaponStats dw2_weapon_stats(int item_id) {
+    Dw2WeaponStats w = { 0.0f, 0.0f, 0 };
+    switch (item_id) {
+    case DW2_ITEM_RAILGUN:      w.threshold = DW2_WEAPON_CHARGE_THRESHOLD; w.damage = DW2_WEAPON_DAMAGE; break;
+    case DW2_ITEM_PULSE_LASER:  w.threshold = 10.0f; w.damage = 3.0f; w.pierce = 1; break;
+    case DW2_ITEM_SIEGE_CANNON: w.threshold = 50.0f; w.damage = 30.0f; break;
+    default: break;
+    }
+    return w;
+}
+
 void dw2_ship_init(Dw2Ship *s) {
     memset(s, 0, sizeof(*s));
     for (int i = 0; i < DW2_MAX_PLACEMENTS; i++) s->placements[i].item_id = -1;
@@ -58,7 +69,7 @@ int dw2_ship_panic_cut(Dw2Ship *s, int placement_idx) {
     /* "the waste from a Panic Cut (Dead Squares) becomes armor" -- live bonus, not deferred to a
      * recompute-from-scratch pass, so a mid-fight cut has an immediate, observable second effect
      * beyond severing/rerouting energy. */
-    for (int i = 0; i < n; i++) if (cells[i].role == DW2_ROLE_DEAD) s->armor += DW2_ARMOR_PER_DEAD_CELL;
+    for (int i = 0; i < n; i++) if (cells[i].role == DW2_ROLE_DEAD) { s->armor += DW2_ARMOR_PER_DEAD_CELL; s->armor_max += DW2_ARMOR_PER_DEAD_CELL; }
     return 1;
 }
 
@@ -76,6 +87,7 @@ void dw2_ship_start_combat(Dw2Ship *s) {
             else if (role == DW2_ROLE_DEAD) s->armor += DW2_ARMOR_PER_DEAD_CELL;
         }
     }
+    s->armor_max = s->armor;
 }
 
 typedef struct { int8_t role; uint8_t port; int8_t placement_idx; } Dw2NetCell;
@@ -85,26 +97,26 @@ static int dw2_path_index(const int *path, int path_len, int cell) {
     return -1;
 }
 
-static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir,
+static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir, float gain,
                       int *path, int *path_len, int *activated, dw2_mask *loop_hits);
 
 /* Forwards energy out of `cell` along every direction bit set in `out_ports`, bounds-checked so a
  * grid-edge cell never wraps into the next/previous row (dw2_cell(row, col+-1) is only valid math
  * when col+-1 is still inside [0, DW2_GRID_W)). */
-static void dw2_flow_dir(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t out_ports,
+static void dw2_flow_dir(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t out_ports, float gain,
                           int *path, int *path_len, int *activated, dw2_mask *loop_hits) {
     int row = cell / DW2_GRID_W, col = cell % DW2_GRID_W;
     if ((out_ports & DW2_PORT_N) && row - 1 >= 0)
-        dw2_flow(s, net, dw2_cell(row - 1, col), DW2_PORT_S, path, path_len, activated, loop_hits);
+        dw2_flow(s, net, dw2_cell(row - 1, col), DW2_PORT_S, gain, path, path_len, activated, loop_hits);
     if ((out_ports & DW2_PORT_E) && col + 1 < DW2_GRID_W)
-        dw2_flow(s, net, dw2_cell(row, col + 1), DW2_PORT_W, path, path_len, activated, loop_hits);
+        dw2_flow(s, net, dw2_cell(row, col + 1), DW2_PORT_W, gain, path, path_len, activated, loop_hits);
     if ((out_ports & DW2_PORT_S) && row + 1 < DW2_GRID_H)
-        dw2_flow(s, net, dw2_cell(row + 1, col), DW2_PORT_N, path, path_len, activated, loop_hits);
+        dw2_flow(s, net, dw2_cell(row + 1, col), DW2_PORT_N, gain, path, path_len, activated, loop_hits);
     if ((out_ports & DW2_PORT_W) && col - 1 >= 0)
-        dw2_flow(s, net, dw2_cell(row, col - 1), DW2_PORT_E, path, path_len, activated, loop_hits);
+        dw2_flow(s, net, dw2_cell(row, col - 1), DW2_PORT_E, gain, path, path_len, activated, loop_hits);
 }
 
-static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir,
+static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir, float gain,
                       int *path, int *path_len, int *activated, dw2_mask *loop_hits) {
     if (dw2_bit(cell) & s->burned) return;
     Dw2NetCell *nc = &net[cell];
@@ -126,17 +138,22 @@ static void dw2_flow(Dw2Ship *s, Dw2NetCell *net, int cell, uint8_t incoming_dir
 
     switch (nc->role) {
         case DW2_ROLE_WEAPON:
-            s->weapon_charge[nc->placement_idx] += DW2_GENERATOR_OUTPUT;
+            s->weapon_charge[nc->placement_idx] += DW2_GENERATOR_OUTPUT * gain;
             break;
+        case DW2_ROLE_AMPLIFIER:   /* a wire with gain */
         case DW2_ROLE_CONDUCTOR:
         case DW2_ROLE_SPLITTER: {
             /* Forward out every active port except the one that just received (`incoming_dir` is
              * this cell's OWN port bit, not the sender's) -- excluding anything else would send
              * energy right back out the port it just arrived on, straight back to the sender. */
             uint8_t out_ports = nc->port & (uint8_t)~incoming_dir;
-            dw2_flow_dir(s, net, cell, out_ports, path, path_len, activated, loop_hits);
+            if (nc->role == DW2_ROLE_AMPLIFIER) gain *= DW2_AMPLIFIER_GAIN;
+            dw2_flow_dir(s, net, cell, out_ports, gain, path, path_len, activated, loop_hits);
             break;
         }
+        case DW2_ROLE_MENDER:
+        case DW2_ROLE_AEGIS:
+            break; /* a sink: being fed is the whole job; dw2_ship_tick reads `activated` for them */
         case DW2_ROLE_ARMOR:
         case DW2_ROLE_NONE:
         case DW2_ROLE_DEAD:
@@ -153,7 +170,7 @@ static void dw2_flow_from_generator(Dw2Ship *s, Dw2NetCell *net, int gcell, int 
     int path_len = 0;
     path[path_len++] = gcell;
     activated[gcell] = 1;
-    dw2_flow_dir(s, net, gcell, net[gcell].port, path, &path_len, activated, loop_hits);
+    dw2_flow_dir(s, net, gcell, net[gcell].port, 1.0f, path, &path_len, activated, loop_hits);
 }
 
 static void dw2_ship_apply_damage(Dw2Ship *s, float dmg) {
@@ -166,6 +183,11 @@ static void dw2_ship_apply_damage(Dw2Ship *s, float dmg) {
         s->hull_pct -= dmg;
         if (s->hull_pct < 0) s->hull_pct = 0;
     }
+}
+
+static void dw2_ship_apply_pierce(Dw2Ship *s, float dmg) {
+    s->hull_pct -= dmg;
+    if (s->hull_pct < 0) s->hull_pct = 0;
 }
 
 /* V0 simplification, named not hidden: `loop_hits` ORs together every closed loop found in a
@@ -215,8 +237,12 @@ void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
 
     for (int p = 0; p < self->placement_n; p++) {
         if (self->placements[p].item_id < 0) continue;
-        if (self->weapon_charge[p] >= DW2_WEAPON_CHARGE_THRESHOLD) {
-            float shot_dmg = DW2_WEAPON_DAMAGE * self->dmg_mult;
+        Dw2WeaponStats ws = dw2_weapon_stats(self->placements[p].item_id);
+        if (ws.threshold <= 0.0f) continue;
+        /* a weapon fed more than its threshold in one second (an Amplifier ahead of a Pulse Laser) shoots more than once; with the
+         * Railgun on a plain wire this loop runs at most once, exactly as before */
+        while (self->weapon_charge[p] >= ws.threshold) {
+            float shot_dmg = ws.damage * self->dmg_mult;
             /* "Cannon programming" (EMILY/BACKLOG.md SECTION 549, docs/LO_CANNON_PROGRAMMING.md):
              * the fire/hold call is a real, compiled LO program (core/cannon.h), not a hardcoded
              * "always fire" rule -- packs the same `behind` signal core/round.h's own comeback
@@ -226,12 +252,27 @@ void dw2_ship_tick(Dw2Ship *self, Dw2Ship *enemy) {
              * leaves weapon_charge untouched, so it's simply re-evaluated fresh next tick. */
             int self_behind = self->hull_pct < enemy->hull_pct;
             int shot_is_overkill = enemy->hull_pct <= shot_dmg;
-            if (dw2_cannon_decide(self_behind, shot_is_overkill) == DW2_CANNON_HOLD) continue;
-            self->weapon_charge[p] -= DW2_WEAPON_CHARGE_THRESHOLD;
+            if (dw2_cannon_decide(self_behind, shot_is_overkill) == DW2_CANNON_HOLD) break;
+            self->weapon_charge[p] -= ws.threshold;
             /* dmg_mult (core/round.h): a graded Overcharge round-break call scales this ship's own
              * outgoing damage for the current round; 1.0 (the default) is byte-identical to pre-
              * round-break behavior. */
-            dw2_ship_apply_damage(enemy, shot_dmg);
+            if (ws.pierce) dw2_ship_apply_pierce(enemy, shot_dmg);
+            else dw2_ship_apply_damage(enemy, shot_dmg);
+        }
+    }
+
+    /* the support parts: a fed Mender mends the hull, a fed Aegis Emitter refills armor up to what the ship started with */
+    if (self->hull_pct > 0.0f) {
+        for (int i = 0; i < DW2_GRID_CELLS; i++) {
+            if (!activated[i] || (dw2_bit(i) & self->burned)) continue;
+            if (net[i].role == DW2_ROLE_MENDER) {
+                self->hull_pct += DW2_MENDER_HEAL;
+                if (self->hull_pct > 100.0f) self->hull_pct = 100.0f;
+            } else if (net[i].role == DW2_ROLE_AEGIS && self->armor < self->armor_max) {
+                self->armor += DW2_AEGIS_RECHARGE;
+                if (self->armor > self->armor_max) self->armor = self->armor_max;
+            }
         }
     }
 }

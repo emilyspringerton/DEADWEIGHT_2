@@ -69,6 +69,14 @@ int dw2_encode(const Dw2WireMsg *m, uint8_t *buf, size_t cap) {
         w8(&w, m->u.round_result.your_call); w8(&w, m->u.round_result.your_grade); w8(&w, m->u.round_result.your_effect);
         w8(&w, m->u.round_result.opp_call); w8(&w, m->u.round_result.opp_grade); w8(&w, m->u.round_result.opp_effect);
         break;
+    case DW2_S_OPP_SHIP:
+        w8(&w, m->u.opp_ship.n);
+        for (int i = 0; i < 16; i++) {
+            w8(&w, m->u.opp_ship.p[i].item); w8(&w, m->u.opp_ship.p[i].row); w8(&w, m->u.opp_ship.p[i].col);
+            w8(&w, m->u.opp_ship.p[i].rot); w8(&w, m->u.opp_ship.p[i].cut);
+        }
+        break;
+    case DW2_S_OPP_CUT: w8(&w, m->u.opp_cut.placement_idx); break;
     case DW2_S_ERROR: w8(&w, m->u.error.code); break;
     default: return -1;
     }
@@ -89,6 +97,7 @@ static int payload_size(uint8_t t) {
     case DW2_S_CUT_ACK: return 1; case DW2_S_CUT_REJECT: return 1;
     case DW2_S_COMBAT_START: return 10; case DW2_S_TICK: return 9; case DW2_S_MATCH_END: return 7;
     case DW2_S_ROUND_BREAK: return 6; case DW2_C_ROUND_CALL: return 1; case DW2_S_ROUND_RESULT: return 6;
+    case DW2_S_OPP_SHIP: return 81; case DW2_S_OPP_CUT: return 1;
     case DW2_S_ERROR: return 1; default: return -1;
     }
 }
@@ -158,6 +167,14 @@ int dw2_decode(const uint8_t *buf, size_t len, Dw2WireMsg *out, size_t *consumed
         out->u.round_result.your_call = (uint8_t)r8(&r); out->u.round_result.your_grade = (uint8_t)r8(&r); out->u.round_result.your_effect = (uint8_t)r8(&r);
         out->u.round_result.opp_call = (uint8_t)r8(&r); out->u.round_result.opp_grade = (uint8_t)r8(&r); out->u.round_result.opp_effect = (uint8_t)r8(&r);
         break;
+    case DW2_S_OPP_SHIP:
+        out->u.opp_ship.n = (uint8_t)r8(&r);
+        for (int i = 0; i < 16; i++) {
+            out->u.opp_ship.p[i].item = (uint8_t)r8(&r); out->u.opp_ship.p[i].row = (uint8_t)r8(&r); out->u.opp_ship.p[i].col = (uint8_t)r8(&r);
+            out->u.opp_ship.p[i].rot = (uint8_t)r8(&r); out->u.opp_ship.p[i].cut = (uint8_t)r8(&r);
+        }
+        break;
+    case DW2_S_OPP_CUT: out->u.opp_cut.placement_idx = (uint8_t)r8(&r); break;
     case DW2_S_ERROR: out->u.error.code = (uint8_t)r8(&r); break;
     default: return -1;
     }

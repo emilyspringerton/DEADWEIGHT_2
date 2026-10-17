@@ -8,7 +8,7 @@
 
 #include "grid.h"
 
-#define DW2_ITEM_COUNT 7
+#define DW2_ITEM_COUNT 12
 #define DW2_MAX_FRAGMENTS 4
 
 /* Stable indices into dw2_catalog[] -- see items.c for the authored data these name. */
@@ -20,6 +20,11 @@ enum {
     DW2_ITEM_BULWARK,
     DW2_ITEM_TITANIUM_BEAM,
     DW2_ITEM_AETHER_ORE,
+    DW2_ITEM_PULSE_LASER,   /* appended: ids 0-6 are on the wire and in the bot pool's ships */
+    DW2_ITEM_SIEGE_CANNON,
+    DW2_ITEM_AMPLIFIER,
+    DW2_ITEM_MENDER,
+    DW2_ITEM_AEGIS,
 };
 
 typedef enum {
@@ -29,7 +34,10 @@ typedef enum {
     DW2_ROLE_SPLITTER,     /* one input port, two output ports: one-to-many is legal (SPEC_REVIEW §3) */
     DW2_ROLE_WEAPON,
     DW2_ROLE_ARMOR,        /* flat armor contributor, does not conduct */
-    DW2_ROLE_DEAD          /* a fragment's Dead Square: inert, becomes armor (NORTHSTAR.md) */
+    DW2_ROLE_DEAD,         /* a fragment's Dead Square: inert, becomes armor (NORTHSTAR.md) */
+    DW2_ROLE_AMPLIFIER,    /* a wire that lifts the energy passing through it by DW2_AMPLIFIER_GAIN */
+    DW2_ROLE_MENDER,       /* fed: mends hull every tick */
+    DW2_ROLE_AEGIS         /* fed: recharges armor every tick, up to the armor the ship started with */
 } Dw2Role;
 
 typedef enum { DW2_KIND_OFFENSE = 0, DW2_KIND_OPERATIONS, DW2_KIND_DEFENSE } Dw2Kind;

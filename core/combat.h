@@ -23,6 +23,14 @@
 #define DW2_ARMOR_PER_ARMOR_ITEM   20.0f  /* Bulwark Plate's own flat contribution */
 #define DW2_ARMOR_PER_DEAD_CELL     8.0f  /* "waste becomes armor" (NORTHSTAR.md) */
 #define DW2_MATCH_TIMEOUT_TICKS      30   /* "a 30-second combat limit" -- 1 tick = 1 second */
+#define DW2_AMPLIFIER_GAIN         1.5f   /* energy passing through an Amplifier is multiplied by this */
+#define DW2_MENDER_HEAL            2.0f   /* hull% per tick, per fed Mender (never past 100) */
+#define DW2_AEGIS_RECHARGE         3.0f   /* armor per tick, per fed Aegis Emitter (never past the armor the ship started with) */
+
+/* What a weapon item fires: it fires when its charge reaches `threshold` (it gains 10 x the gain of the path that feeds it each tick),
+ * for `damage` hull%; `pierce` shots skip the armor and hit the hull. threshold 0 = not a weapon. */
+typedef struct { float threshold, damage; int pierce; } Dw2WeaponStats;
+Dw2WeaponStats dw2_weapon_stats(int item_id);
 
 typedef struct {
     int item_id;                 /* index into dw2_catalog, -1 = empty slot */
@@ -44,6 +52,7 @@ typedef struct {
     Dw2LoopTracker loop;
     float hull_pct;
     float armor;
+    float armor_max;                        /* the armor the ship started the fight with (+ permanent gains): what an Aegis recharges to */
     int cargo_value;
     int shatter_events;                     /* test-observable: how many times Back-EMF has fired */
     float dmg_mult;                         /* multiplies this ship's OWN weapon damage output for

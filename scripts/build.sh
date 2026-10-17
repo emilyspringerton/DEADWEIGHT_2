@@ -28,7 +28,7 @@ rm -rf build && mkdir -p build
 
 echo "== C: core-loop tests (ASan+UBSan) =="
 gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
-    tests/test_core_loop.c core/items.c core/combat.c core/dummy.c core/round.c $CANNON_SRC -o build/test_core_loop
+    tests/test_core_loop.c core/items.c core/combat.c core/dummy.c core/round.c core/protocol.c $CANNON_SRC -o build/test_core_loop
 ./build/test_core_loop
 
 echo "== GUI: local debug shell (SDL2) + headless selftest =="

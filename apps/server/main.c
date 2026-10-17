@@ -318,6 +318,19 @@ static void start_combat_if_ready(int mi) {
         m.u.combat_start.armor_you = clamp_u16(you->armor); m.u.combat_start.armor_opp = clamp_u16(opp->armor);
         m.u.combat_start.cargo_you = clamp_u16((float)you->cargo_value); m.u.combat_start.cargo_opp = clamp_u16((float)opp->cargo_value);
         send_msg(ci, &m);
+        /* packing was secret; the fight is not: each side now sees the other's ship (OPP_SHIP), and any Panic Cut after this (OPP_CUT) */
+        Dw2WireMsg o; memset(&o, 0, sizeof o); o.type = DW2_S_OPP_SHIP;
+        o.u.opp_ship.n = (uint8_t)opp->placement_n;
+        for (int i = 0; i < 16; i++) {
+            o.u.opp_ship.p[i].item = 255;
+            if (i < opp->placement_n && opp->placements[i].item_id >= 0) {
+                const Dw2Placement *pl = &opp->placements[i];
+                o.u.opp_ship.p[i].item = (uint8_t)pl->item_id; o.u.opp_ship.p[i].row = (uint8_t)pl->anchor_row;
+                o.u.opp_ship.p[i].col = (uint8_t)pl->anchor_col; o.u.opp_ship.p[i].rot = (uint8_t)pl->rotation;
+                o.u.opp_ship.p[i].cut = (uint8_t)pl->cut;
+            }
+        }
+        send_msg(ci, &o);
     }
     vlog("match %u: combat start (%s vs %s)", mt->id, conns[mt->conn[0]].name, conns[mt->conn[1]].name);
 }
@@ -473,6 +486,10 @@ static void handle_cut(int ci, const Dw2WireMsg *m) {
     int ok = dw2_ship_panic_cut(&mt->ship[c->seat], m->u.cut.placement_idx);
     if (!ok) { r.type = DW2_S_CUT_REJECT; r.u.cut_reject.reason = DW2_CUT_REJ_ILLEGAL; send_msg(ci, &r); return; }
     r.type = DW2_S_CUT_ACK; r.u.cut_ack.placement_idx = m->u.cut.placement_idx; send_msg(ci, &r);
+    if (c->state == S_COMBAT) {
+        Dw2WireMsg o; memset(&o, 0, sizeof o); o.type = DW2_S_OPP_CUT; o.u.opp_cut.placement_idx = m->u.cut.placement_idx;
+        send_msg(mt->conn[1 - c->seat], &o);
+    }
 }
 
 /* DW2_C_ROUND_CALL: legal only while c->state == S_COMBAT AND the match is actually mid-round-

@@ -99,4 +99,37 @@ const Dw2ItemDef dw2_catalog[DW2_ITEM_COUNT] = {
             { { 0, 3, 0, DW2_ROLE_NONE }, { 1, 3, 0, DW2_ROLE_DEAD } },
         },
     },
+    [7] = {
+        /* Pulse Laser: a fast, light weapon. 10 energy fires it, so a fed laser shoots every tick; each shot is 3 damage that
+         * goes straight to the hull (armor does not stop it). The answer to a ship hiding behind Bulwark Plates. */
+        .name = "Pulse Laser", .kind = DW2_KIND_OFFENSE, .value = 260,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON } },
+    },
+    [8] = {
+        /* Siege Cannon: a 1x2 heavy weapon. Fed at its west end; the barrel is the second cell. 50 energy per shot, 30 damage
+         * that armor absorbs: a fed cannon fires on seconds 5, 10, 15 ... just ahead of each round break. */
+        .name = "Siege Cannon", .kind = DW2_KIND_OFFENSE, .value = 320,
+        .split_class = DW2_SPLIT_NONE, .base_n = 2,
+        .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON }, { 1, 0, 0, DW2_ROLE_NONE } },
+    },
+    [9] = {
+        /* Amplifier: a wire with gain. Everything downstream of it gets DW2_AMPLIFIER_GAIN times the energy. */
+        .name = "Amplifier", .kind = DW2_KIND_OPERATIONS, .value = 150,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_AMPLIFIER } },
+    },
+    [10] = {
+        /* Mender: fed from its west side, it mends 2 hull every second. The answer to lasers, which armor cannot stop. */
+        .name = "Mender", .kind = DW2_KIND_OPERATIONS, .value = 200,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_MENDER } },
+    },
+    [11] = {
+        /* Aegis Emitter: fed from its west side, it recharges 3 armor every second, back up to the armor the ship started with.
+         * The answer to railguns and cannons, which armor does stop. */
+        .name = "Aegis Emitter", .kind = DW2_KIND_DEFENSE, .value = 220,
+        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+        .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_AEGIS } },
+    },
 };

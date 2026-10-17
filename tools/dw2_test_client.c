@@ -135,6 +135,10 @@ int main(int argc, char **argv) {
         } else if (m.type == DW2_S_TICK) {
             printf("TICK t=%u hull=%u/%u armor=%u/%u shatter=%u/%u\n", m.u.tick.elapsed_ticks, m.u.tick.hull_you, m.u.tick.hull_opp,
                    m.u.tick.armor_you, m.u.tick.armor_opp, m.u.tick.shatter_you, m.u.tick.shatter_opp);
+        } else if (m.type == DW2_S_OPP_SHIP) {
+            printf("OPP_SHIP n=%u\n", m.u.opp_ship.n);
+        } else if (m.type == DW2_S_OPP_CUT) {
+            printf("OPP_CUT idx=%u\n", m.u.opp_cut.placement_idx);
         } else if (m.type == DW2_S_ROUND_BREAK) {
             printf("ROUND_BREAK round=%u behind=%u target_ms=%u budget_ms=%u\n", m.u.round_break.round_no,
                    m.u.round_break.behind, m.u.round_break.target_ms, m.u.round_break.budget_ms);
