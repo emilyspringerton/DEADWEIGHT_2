@@ -52,7 +52,7 @@ DW2_SRV_PID=$!
 trap 'kill "$DW2_SRV_PID" 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$DW2_TEST_PORT " && break; sleep 0.1; done
 
-# Same real loadout apps/local's own --selftest fights (Generator+Conductor+Railgun+Bulwark) vs an
+# A Generator feeding a Pulse Laser (a laser cannot be dodged, and an empty ship is the lightest there is, so it would dodge half of any slugs) vs an
 # empty grid -- proves a real, full server-authoritative match resolves through the actual TCP wire
 # protocol (not a shortcut), same "run it for real" discipline --selftest already established for
 # the local core loop. Neither client scripts a --round-call, so every round-break (core/round.h,
@@ -62,7 +62,7 @@ for _ in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$DW2_TEST_PORT " && bre
 # because each of the 4 round-breaks before tick 21 now adds a real ~1200ms wall-clock wait with no
 # caller (DW2_ROUND_BUDGET_MS), not because the combat math itself changed.
 ./build/dw2_test_client --port "$DW2_TEST_PORT" --name SmokeA --timeout-ms 20000 \
-    --place 0,0,0,0 --place 1,0,1,0 --place 3,0,2,0 --place 4,3,3,0 > build/dw2_smoke_a.log &
+    --place 0,0,0,0 --place 7,0,1,0 > build/dw2_smoke_a.log &
 CLIENT_A_PID=$!
 ./build/dw2_test_client --port "$DW2_TEST_PORT" --name SmokeB --timeout-ms 20000 > build/dw2_smoke_b.log &
 CLIENT_B_PID=$!
@@ -74,20 +74,17 @@ grep -q "^MATCH_END result=0 reason=0" build/dw2_smoke_b.log || { echo "smoke te
 echo "dw2_server smoke test: A (real loadout) beat B (empty grid) on hull, as hand-derived"
 
 echo "== D2: round-break mini-game -- comeback smoke test (ASan+UBSan) =="
-# Proves the actual claim of EMILY/BACKLOG.md SECTION 548 end to end over the real wire protocol,
-# not just in the pure-logic unit tests above: two IDENTICAL loadouts (same as the smoke test
-# above) fire in perfect lockstep and, left alone, hand-derive to an EXACT TIE at tick 24 (both
-# hulls hit 0 on the same tick -- 20 armor each absorbs the tick-3/tick-6 shots, then 15 dmg/hit on
-# ticks 9,12,15,18,21,24 drains 100 -> 0 for both, simultaneously). Scripting ONLY ClientA to call
-# Overcharge at round-break #2 (after tick 10, hull 75/75 -- still exactly even, so this is the
-# baseline non-behind 1.5x payoff, not the comeback-amplified one; that exact value is pinned by
-# test_round_overcharge_payoffs in tests/test_core_loop.c instead, no networking needed for it) and
-# sleeping for the server-given target_ms turns that tie into a real win for A, three ticks early:
-#   round3 (ticks 11-15, A's dmg_mult=1.5x): tick12 A deals 22.5 (B 75->52.5), B deals 15 (A 75->60)
-#                                            tick15 A deals 22.5 (B 52.5->30), B deals 15 (A 60->45)
-#   round4 (ticks 16-20, back to neutral):   tick18 A deals 15 (B 30->15),   B deals 15 (A 45->30)
-#   round5 (ticks 21-25, neutral):           tick21 A deals 15 (B 15->0, DEAD), B deals 15 (A 30->15)
-# -> A wins at tick 21 (hull 15% vs 0%), where the untouched baseline would still be an even tie.
+# Proves the actual claim of EMILY/BACKLOG.md SECTION 548 end to end over the real wire protocol, not just in the pure-logic unit tests above:
+# a single well-timed Overcharge call changes the outcome of a real match. A (Generator -> Pulse Laser) is fed 10 W, so its laser fires every second
+# for 10 x DW2_HULL_FACTOR = 5 hull into B's empty lane; B is an empty ship that never fires back. Left alone that is 20 shots and B is dead at tick 20
+# (the smoke test above). Scripting A to call Overcharge at round-break #2 (after tick 10) and sleeping for the server-given target_ms grades it
+# PERFECT. A is AHEAD at the break (core/round.h's catch-up lever: a win by the leader is worth only 40% of its bonus), so its next round of ticks
+# (11-15) deals x1.2, not x1.5, and the hand-derived timeline is:
+#   ticks 1-10     5 each               B 100 -> 50
+#   ticks 11-15    6 each (x1.2)        B 20
+#   ticks 16, 17, 18   5 each (round 4 is back to neutral)   B 5
+#   tick 19        5                    B dead
+# -> A wins on hull at tick 19, one tick earlier than the untouched baseline (tick 20).
 DW2_TEST_PORT3=17802
 ./build/dw2_server --port "$DW2_TEST_PORT3" --human-wait-ms 0 --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
     > build/dw2_server_round_smoketest.log 2>&1 &
@@ -96,19 +93,18 @@ trap 'kill "$DW2_SRV3_PID" 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$DW2_TEST_PORT3 " && break; sleep 0.1; done
 
 ./build/dw2_test_client --port "$DW2_TEST_PORT3" --name RoundA --timeout-ms 20000 \
-    --place 0,0,0,0 --place 1,0,1,0 --place 3,0,2,0 --place 4,3,3,0 --round-call 2:overcharge > build/dw2_round_a.log &
+    --place 0,0,0,0 --place 7,0,1,0 --round-call 2:overcharge > build/dw2_round_a.log &
 ROUND_A_PID=$!
-./build/dw2_test_client --port "$DW2_TEST_PORT3" --name RoundB --timeout-ms 20000 \
-    --place 0,0,0,0 --place 1,0,1,0 --place 3,0,2,0 --place 4,3,3,0 > build/dw2_round_b.log &
+./build/dw2_test_client --port "$DW2_TEST_PORT3" --name RoundB --timeout-ms 20000 > build/dw2_round_b.log &
 ROUND_B_PID=$!
 wait "$ROUND_A_PID"; wait "$ROUND_B_PID"
 kill "$DW2_SRV3_PID" 2>/dev/null || true; trap - EXIT
 
 grep -q "^ROUND_CALL round=2 call=overcharge" build/dw2_round_a.log || { echo "round smoke test FAILED: A never sent its scripted round-2 Overcharge call, see build/dw2_round_a.log"; cat build/dw2_round_a.log; exit 1; }
 grep -q "^ROUND_RESULT your_call=0 your_grade=3" build/dw2_round_a.log || { echo "round smoke test FAILED: A's round-2 Overcharge call wasn't graded PERFECT (timing landed outside the window), see build/dw2_round_a.log"; cat build/dw2_round_a.log; exit 1; }
-grep -q "^MATCH_END result=1 reason=0 ticks=21" build/dw2_round_a.log || { echo "round smoke test FAILED: expected A to win on hull at tick 21 (see comment above for the hand-derived math), see build/dw2_round_a.log"; cat build/dw2_round_a.log; exit 1; }
-grep -q "^MATCH_END result=0 reason=0 ticks=21" build/dw2_round_b.log || { echo "round smoke test FAILED: expected B to lose on hull at tick 21, see build/dw2_round_b.log"; cat build/dw2_round_b.log; exit 1; }
-echo "round-break smoke test: A's single well-timed Overcharge call turned an identical-loadout tie into a win at tick 21, as hand-derived"
+grep -q "^MATCH_END result=1 reason=0 ticks=19" build/dw2_round_a.log || { echo "round smoke test FAILED: expected A to win on hull at tick 19 (see comment above for the hand-derived math), see build/dw2_round_a.log"; cat build/dw2_round_a.log; exit 1; }
+grep -q "^MATCH_END result=0 reason=0 ticks=19" build/dw2_round_b.log || { echo "round smoke test FAILED: expected B to lose on hull at tick 19, see build/dw2_round_b.log"; cat build/dw2_round_b.log; exit 1; }
+echo "round-break smoke test: A's single well-timed Overcharge call won the match at tick 19 instead of 20, as hand-derived"
 
 echo "== D2: dw2_client (real interactive client) + headless wire-protocol smoke test (ASan+UBSan) =="
 gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all $(pkg-config --cflags sdl2) \
@@ -161,7 +157,7 @@ DW2_BOT_PID=$!
 sleep 1
 # a human with a real loadout is paired with the oldest waiting bot and a full match resolves
 ./build/dw2_test_client --port "$DW2_TEST_PORT4" --name HumanVsBot --timeout-ms 30000 \
-    --place 0,0,0,0 --place 1,0,1,0 --place 3,0,2,0 --place 4,3,3,0 > build/dw2_human_vs_bot.log
+    --place 0,0,0,0 --place 7,0,1,0 > build/dw2_human_vs_bot.log
 kill "$DW2_BOT_PID" "$DW2_SRV4_PID" 2>/dev/null || true; trap - EXIT
 grep -q "^MATCH_FOUND .* opp=.* Bot pack_ms" build/dw2_human_vs_bot.log || { echo "bot smoke test FAILED: the human was not paired with a bot, see build/dw2_human_vs_bot.log"; cat build/dw2_human_vs_bot.log; exit 1; }
 grep -q "^MATCH_END" build/dw2_human_vs_bot.log || { echo "bot smoke test FAILED: no MATCH_END, see build/dw2_human_vs_bot.log"; cat build/dw2_human_vs_bot.log; exit 1; }

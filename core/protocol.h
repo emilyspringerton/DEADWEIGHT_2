@@ -30,6 +30,8 @@
 #define DW2_MAX_AUTH_TOKEN 900   /* IDUNA ES256 JWTs are ~400-500 bytes */
 #define DW2_MAX_TOKEN 200
 #define DW2_NAME_LEN 16
+#define DW2_WIRE_MAX_PARTS 36    /* the most parts a ship can carry: one per cell */
+#define DW2_WIRE_MAX_EVENTS 60   /* events in one EVENTS frame (7 bytes each) */
 
 enum {
     DW2_C_HELLO = 0x01, DW2_C_AUTH = 0x02, DW2_C_QUEUE = 0x03, DW2_C_PLACE = 0x04,
@@ -39,12 +41,12 @@ enum {
     DW2_S_PLACE_REJECT = 0x85, DW2_S_CUT_ACK = 0x86, DW2_S_CUT_REJECT = 0x87,
     DW2_S_COMBAT_START = 0x88, DW2_S_TICK = 0x89, DW2_S_MATCH_END = 0x8A, DW2_S_PONG = 0x8B,
     DW2_S_ROUND_BREAK = 0x8C, DW2_S_ROUND_RESULT = 0x8D,
-    DW2_S_OPP_SHIP = 0x90, DW2_S_OPP_CUT = 0x91,
+    DW2_S_OPP_SHIP = 0x90, DW2_S_OPP_CUT = 0x91, DW2_S_EVENTS = 0x92,
     DW2_S_ERROR = 0x8F
 };
 enum { DW2_KIND_HUMAN = 0, DW2_KIND_BOT = 1 };
 enum { DW2_FLAG_AUTH_REQUIRED = 1 };
-enum { DW2_PL_REJ_BAD_STATE = 1, DW2_PL_REJ_ILLEGAL = 2 };
+enum { DW2_PL_REJ_BAD_STATE = 1, DW2_PL_REJ_ILLEGAL = 2, DW2_PL_REJ_BUDGET = 3 };
 enum { DW2_CUT_REJ_BAD_STATE = 1, DW2_CUT_REJ_ILLEGAL = 2 };
 enum { DW2_RES_LOSS = 0, DW2_RES_WIN = 1, DW2_RES_TIE = 2 };
 enum { DW2_END_HULL = 0, DW2_END_TIMEOUT = 1, DW2_END_FORFEIT = 2, DW2_END_SERVER = 3 };
@@ -85,11 +87,13 @@ typedef struct {
          * hull% backfire instead; BRACE -> the flat armor bonus added, 0 on MISS/NONE. */
         struct { uint8_t your_call, your_grade, your_effect, opp_call, opp_grade, opp_effect; } round_result;
         /* OPP_SHIP: sent once, right after COMBAT_START, to each side: the opponent's packed ship. Packing is secret; the fight is not.
-         * n placements in index order (so OPP_CUT's index means the same slot), then unused slots with item 255. A placement's cut
-         * flag is set if it was cut during packing. Fixed size so old decoders need only learn the type. */
-        struct { uint8_t n; struct { uint8_t item, row, col, rot, cut; } p[16]; } opp_ship;
-        /* OPP_CUT: the opponent Panic-Cut placement `placement_idx` during the fight (the server accepted it). */
+         * n placements in index order, then unused slots with item 255. Fixed size. */
+        struct { uint8_t n; struct { uint8_t item, row, col, rot; } p[DW2_WIRE_MAX_PARTS]; } opp_ship;
+        /* OPP_CUT: reserved (ruleset 1 let a part be cut in the fight; ruleset 2 does not) */
         struct { uint8_t placement_idx; } opp_cut;
+        /* EVENTS: sent right after every TICK: what that second did, in order (core/combat.h Dw2Event, the sides already turned so 0 is the
+         * recipient's ship and 1 the opponent's). structure_*: the HP still standing on each ship. dropped: events the server had no room for. */
+        struct { uint8_t tick, n, dropped; uint16_t structure_you, structure_opp; struct { uint8_t type, side, a, b, c, d, e; } ev[DW2_WIRE_MAX_EVENTS]; } events;
         struct { uint8_t code; } error;
     } u;
 } Dw2WireMsg;

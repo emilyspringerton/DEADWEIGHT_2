@@ -100,9 +100,6 @@ static void pack_ship(Bot *b) {
         m.u.place.anchor_col = (uint8_t)lo->op[i].col; m.u.place.rotation = (uint8_t)lo->op[i].rot;
         send_msg(b, &m);
     }
-    for (int i = 0; i < lo->n; i++) if (lo->op[i].cut) {
-        Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_C_PANIC_CUT; m.u.cut.placement_idx = (uint8_t)i; send_msg(b, &m);
-    }
 }
 
 static void on_msg(Bot *b, const Dw2WireMsg *m, uint64_t now) {

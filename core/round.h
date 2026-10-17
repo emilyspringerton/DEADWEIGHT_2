@@ -55,7 +55,7 @@ uint16_t dw2_round_target_ms(uint32_t match_seed, int round_no);
 /* The mechanical effect of one graded call, applied once to the calling ship at resolution. */
 typedef struct { float dmg_mult; float armor_bonus; float self_damage; } Dw2RoundEffect;
 
-/* Where a ship stands at the break: the catch-up lever. The standing is hull + armor, theirs against yours.
+/* Where a ship stands at the break: the catch-up lever. The standing is hull + shield + structure/8 (dw2_ship_standing_score), theirs against yours.
  * LEADING: a win is worth only 40% of its bonus and a miss costs 60% more. TRAILING: a win is worth 60% more and a miss costs 40% more. */
 enum { DW2_STAND_LEVEL = 0, DW2_STAND_BEHIND = 1, DW2_STAND_AHEAD = 2 };
 #define DW2_STAND_AHEAD_WIN   0.4f

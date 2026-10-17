@@ -4,11 +4,10 @@
  *
  * Controls (printed to stdout on launch, since a bitmap font renderer is real UI-polish work this
  * phase explicitly scopes out):
- *   1-7        select an item from the catalog
+ *   1-9        select an item from the catalog (the first nine)
  *   arrows/WASD move the grid cursor
  *   R          rotate the selected item / the item under the cursor
  *   ENTER      place the selected item at the cursor (packing phase only)
- *   C          Panic Cut the item under the cursor (legal in packing OR mid-combat)
  *   F          lock the grid and start the fight
  *   ESC        quit
  */
@@ -33,7 +32,7 @@ typedef enum { MODE_PACK, MODE_COMBAT, MODE_DONE } AppMode;
 
 typedef struct { Uint8 r, g, b; } Col;
 static const Col COL_BG = { 18, 20, 28 }, COL_CURSOR = { 255, 255, 255 },
-    COL_RUINED = { 90, 30, 30 }, COL_BLOCKADE = { 10, 10, 10 };
+    COL_BLOCKADE = { 10, 10, 10 };
 static const Col COL_KIND[3] = { { 215, 70, 60 }, { 225, 160, 40 }, { 70, 140, 230 } }; /* Offense/Ops/Defense */
 static const Col COL_GENERATOR = { 80, 220, 120 }, COL_CONDUCTOR = { 200, 200, 210 },
     COL_SPLITTER = { 80, 210, 220 }, COL_WEAPON = { 240, 90, 40 }, COL_ARMOR = { 90, 140, 240 },
@@ -69,7 +68,6 @@ static void draw_ship(const Dw2Ship *s, int origin_x, int origin_y, int cursor_r
             int x = origin_x + col * CELL_PX, y = origin_y + row * CELL_PX;
             Col bg = COL_BG;
             if (s->grid.blockade & dw2_bit(cell)) bg = COL_BLOCKADE;
-            else if (s->grid.ruined & dw2_bit(cell)) bg = COL_RUINED;
             rect(x, y, CELL_PX - 2, CELL_PX - 2, bg);
         }
     }
@@ -80,9 +78,12 @@ static void draw_ship(const Dw2Ship *s, int origin_x, int origin_y, int cursor_r
         for (int c = 0; c < pl->cell_n; c++) {
             if (!pl->cells[c].in_bounds) continue;
             int x = origin_x + pl->cells[c].col * CELL_PX, y = origin_y + pl->cells[c].row * CELL_PX;
-            rect(x, y, CELL_PX - 2, CELL_PX - 2, role_color(pl->cells[c].role, kind));
-            if (s->burned & dw2_bit(dw2_cell(pl->cells[c].row, pl->cells[c].col)))
-                frame(x, y, CELL_PX - 2, CELL_PX - 2, (Col){ 255, 0, 0 }, 3);
+            int cell = dw2_cell(pl->cells[c].row, pl->cells[c].col);
+            Col col = role_color(pl->cells[c].role, kind);
+            /* a damaged part fades toward black in proportion to the HP it has lost */
+            if (s->cell_max[cell] > 0.0f) { float f = s->cell_hp[cell] / s->cell_max[cell]; col.r = (Uint8)(col.r * (0.3f + 0.7f * f)); col.g = (Uint8)(col.g * (0.3f + 0.7f * f)); col.b = (Uint8)(col.b * (0.3f + 0.7f * f)); }
+            rect(x, y, CELL_PX - 2, CELL_PX - 2, col);
+            if (s->dead & dw2_bit(cell)) frame(x, y, CELL_PX - 2, CELL_PX - 2, (Col){ 255, 0, 0 }, 3);
         }
     }
     if (show_cursor) {
@@ -95,16 +96,9 @@ static void draw_ship(const Dw2Ship *s, int origin_x, int origin_y, int cursor_r
     float hull_frac = s->hull_pct / 100.0f; if (hull_frac < 0) hull_frac = 0;
     rect(origin_x, bar_y, bar_w, 14, (Col){ 40, 20, 20 });
     rect(origin_x, bar_y, (int)(bar_w * hull_frac), 14, (Col){ 220, 60, 60 });
-    float armor_frac = s->armor / 100.0f; if (armor_frac > 1) armor_frac = 1;
+    float armor_frac = dw2_ship_structure_max(s) > 0.0f ? dw2_ship_structure(s) / dw2_ship_structure_max(s) : 1.0f;   /* the share of the structure still standing */
     rect(origin_x, bar_y + 20, bar_w, 10, (Col){ 20, 30, 45 });
     rect(origin_x, bar_y + 20, (int)(bar_w * armor_frac), 10, COL_ARMOR);
-}
-
-static void find_placement_under_cursor(const Dw2Ship *s, int row, int col, int *out_idx) {
-    *out_idx = -1;
-    dw2_mask bit = dw2_bit(dw2_cell(row, col));
-    for (int p = 0; p < s->placement_n; p++)
-        if (s->placements[p].item_id >= 0 && (s->placements[p].mask & bit)) { *out_idx = p; return; }
 }
 
 /* Headless smoke test (matches DEADWEIGHT's own dw_gui --selftest convention): mirrors the dummy's
@@ -119,12 +113,12 @@ static int run_selftest(void) {
     dw2_ship_place(&player, DW2_ITEM_BULWARK, 3, 3, 0);
     dw2_ship_start_combat(&player);
     Dw2Ship dummy; dw2_build_dummy_ship(&dummy);
+    dummy.idx = 1;
 
     Dw2MatchResult result = DW2_RESULT_ONGOING;
     int ticks = 0;
     for (; ticks < DW2_MATCH_TIMEOUT_TICKS + 5 && result == DW2_RESULT_ONGOING; ticks++) {
-        dw2_ship_tick(&player, &dummy);
-        dw2_ship_tick(&dummy, &player);
+        dw2_match_tick(&player, &dummy, ticks, NULL);
         result = dw2_match_result(&player, &dummy, ticks + 1);
         rect(0, 0, WIN_W, WIN_H, COL_BG);
         draw_ship(&player, GRID_ORIGIN_X, GRID_ORIGIN_Y, 0, 0, 0);
@@ -140,7 +134,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--selftest")) selftest = 1;
 
     printf("DEADWEIGHT_2 -- local core-loop debug shell (Phase D1, no networking)\n");
-    printf("  1-7 select item | arrows/WASD move cursor | R rotate | ENTER place | C panic cut | F fight | ESC quit\n");
+    printf("  1-9 select item | arrows/WASD move cursor | R rotate | ENTER place | F fight | ESC quit\n");
     for (int i = 0; i < DW2_ITEM_COUNT; i++) printf("    [%d] %s\n", i + 1, dw2_catalog[i].name);
 
     if (selftest) SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
@@ -161,6 +155,7 @@ int main(int argc, char **argv) {
 
     Dw2Ship player; dw2_ship_init(&player);
     Dw2Ship dummy; dw2_build_dummy_ship(&dummy);
+    dummy.idx = 1;
 
     AppMode mode = MODE_PACK;
     int cursor_row = 0, cursor_col = 0, sel_item = 0, sel_rotation = 0;
@@ -176,7 +171,7 @@ int main(int argc, char **argv) {
             else if (e.type == SDL_KEYDOWN) {
                 SDL_Keycode k = e.key.keysym.sym;
                 if (k == SDLK_ESCAPE) running = 0;
-                else if (mode == MODE_PACK && k >= SDLK_1 && k <= SDLK_7) {
+                else if (mode == MODE_PACK && k >= SDLK_1 && k <= SDLK_9) {
                     sel_item = (int)(k - SDLK_1);
                     printf("selected: %s\n", dw2_catalog[sel_item].name);
                 } else if (k == SDLK_UP || k == SDLK_w) cursor_row = cursor_row > 0 ? cursor_row - 1 : cursor_row;
@@ -188,13 +183,6 @@ int main(int argc, char **argv) {
                     int idx = dw2_ship_place(&player, sel_item, cursor_row, cursor_col, sel_rotation);
                     printf(idx >= 0 ? "placed %s at (%d,%d)\n" : "illegal placement\n",
                            dw2_catalog[sel_item].name, cursor_row, cursor_col);
-                } else if (k == SDLK_c) {
-                    int idx; find_placement_under_cursor(&player, cursor_row, cursor_col, &idx);
-                    if (idx >= 0) {
-                        int ok = dw2_ship_panic_cut(&player, idx);
-                        printf(ok ? "Panic Cut! %s fragmented.\n" : "Panic Cut failed (no room for fragments).\n",
-                               dw2_catalog[player.placements[idx].item_id].name);
-                    }
                 } else if (k == SDLK_f && mode == MODE_PACK) {
                     dw2_ship_start_combat(&player);
                     mode = MODE_COMBAT;
@@ -208,8 +196,7 @@ int main(int argc, char **argv) {
             Uint32 now = SDL_GetTicks();
             if (now - last_tick_ms >= TICK_MS) {
                 last_tick_ms = now;
-                dw2_ship_tick(&player, &dummy);
-                dw2_ship_tick(&dummy, &player);
+                dw2_match_tick(&player, &dummy, elapsed_ticks, NULL);
                 elapsed_ticks++;
                 result = dw2_match_result(&player, &dummy, elapsed_ticks);
                 if (result != DW2_RESULT_ONGOING) {

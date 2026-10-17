@@ -9,9 +9,9 @@
  * doesn't fit DW2's TCP, single-process, real-time-tick design -- so, same as DEADWEIGHT's own
  * dw_server, this binary does its own in-process FIFO queueing.
  *
- * Match lifecycle: QUEUE -> paired -> MATCH_FOUND (packing phase, PLACE/PANIC_CUT/READY, timed by
- * --pack-ms) -> COMBAT_START (both ships locked via dw2_ship_start_combat) -> one dw2_ship_tick()
- * pair per --tick-ms (PANIC_CUT still legal live, per core/combat.h's own doc comment) -> MATCH_END
+ * Match lifecycle: QUEUE -> paired -> MATCH_FOUND (packing phase, PLACE/READY, timed by
+ * --pack-ms) -> COMBAT_START (both ships locked via dw2_ship_start_combat) -> one dw2_match_tick()
+ * per --tick-ms (TICK, then EVENTS: everything that second did) -> MATCH_END
  * when dw2_match_result() stops returning DW2_RESULT_ONGOING. */
 #include "../../core/net.h"
 #include <signal.h>
@@ -169,7 +169,7 @@ static void send_error(int ci, int code) {
     conns[ci].close_after_flush = 1;
 }
 
-static uint8_t hull_u8(float v) { if (v < 0) v = 0; if (v > 100) v = 100; return (uint8_t)v; }
+static uint8_t hull_u8(float v) { if (v <= 0) return 0; if (v > 100) v = 100; return v < 1.0f ? 1 : (uint8_t)(v + 0.5f); }   /* never shows 0 while the ship is alive */
 static uint16_t clamp_u16(float v) { if (v < 0) v = 0; if (v > 65535) v = 65535; return (uint16_t)v; }
 
 static void end_match(int mi, int reason) {
@@ -207,8 +207,27 @@ static void send_tick(Match *mt) {
         Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_TICK;
         m.u.tick.elapsed_ticks = (uint8_t)mt->elapsed_ticks;
         m.u.tick.hull_you = hull_u8(you->hull_pct); m.u.tick.hull_opp = hull_u8(opp->hull_pct);
-        m.u.tick.armor_you = clamp_u16(you->armor); m.u.tick.armor_opp = clamp_u16(opp->armor);
+        m.u.tick.armor_you = clamp_u16(you->shield); m.u.tick.armor_opp = clamp_u16(opp->shield);   /* the Brace shield (ruleset 2: armor is parts, see EVENTS) */
         m.u.tick.shatter_you = (uint8_t)you->shatter_events; m.u.tick.shatter_opp = (uint8_t)opp->shatter_events;
+        send_msg(mt->conn[s], &m);
+    }
+}
+
+/* The second's events, to each side with the sides turned (0 = the recipient's own ship). */
+static void send_events(Match *mt, const Dw2EventLog *log) {
+    for (int s = 0; s < 2; s++) {
+        Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_EVENTS;
+        m.u.events.tick = (uint8_t)mt->elapsed_ticks;
+        m.u.events.n = (uint8_t)(log->n > DW2_WIRE_MAX_EVENTS ? DW2_WIRE_MAX_EVENTS : log->n);
+        m.u.events.dropped = (uint8_t)(log->dropped > 255 ? 255 : log->dropped);
+        m.u.events.structure_you = clamp_u16(dw2_ship_structure(&mt->ship[s]) + 0.5f);
+        m.u.events.structure_opp = clamp_u16(dw2_ship_structure(&mt->ship[1 - s]) + 0.5f);
+        for (int i = 0; i < m.u.events.n; i++) {
+            m.u.events.ev[i].type = log->ev[i].type;
+            m.u.events.ev[i].side = (uint8_t)(log->ev[i].side == s ? 0 : 1);
+            m.u.events.ev[i].a = log->ev[i].a; m.u.events.ev[i].b = log->ev[i].b; m.u.events.ev[i].c = log->ev[i].c;
+            m.u.events.ev[i].d = log->ev[i].d; m.u.events.ev[i].e = log->ev[i].e;
+        }
         send_msg(mt->conn[s], &m);
     }
 }
@@ -240,7 +259,7 @@ static void begin_round_break(int mi) {
         const Dw2Ship *you = &mt->ship[s], *opp = &mt->ship[1 - s];
         Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_ROUND_BREAK;
         m.u.round_break.round_no = (uint8_t)mt->round_no;
-        m.u.round_break.behind = (uint8_t)dw2_standing(you->hull_pct, you->armor, opp->hull_pct, opp->armor);
+        m.u.round_break.behind = (uint8_t)dw2_standing(dw2_ship_standing_score(you), 0.0f, dw2_ship_standing_score(opp), 0.0f);
         m.u.round_break.target_ms = dw2_round_target_ms(mt->seed, mt->round_no);
         m.u.round_break.budget_ms = DW2_ROUND_BUDGET_MS;
         send_msg(mt->conn[s], &m);
@@ -255,7 +274,8 @@ static void begin_round_break(int mi) {
 static void resolve_round_break(int mi) {
     Match *mt = &matches[mi];
     const Dw2Ship *sh0 = &mt->ship[0], *sh1 = &mt->ship[1];
-    int behind[2] = { dw2_standing(sh0->hull_pct, sh0->armor, sh1->hull_pct, sh1->armor), dw2_standing(sh1->hull_pct, sh1->armor, sh0->hull_pct, sh0->armor) };
+    float sc0 = dw2_ship_standing_score(sh0), sc1 = dw2_ship_standing_score(sh1);
+    int behind[2] = { dw2_standing(sc0, 0.0f, sc1, 0.0f), dw2_standing(sc1, 0.0f, sc0, 0.0f) };
     int grade[2]; Dw2RoundEffect eff[2]; int call[2];
     for (int s = 0; s < 2; s++) {
         int no_call = (mt->round_call[s] < 0);
@@ -281,10 +301,11 @@ static void resolve_round_break(int mi) {
 
 static void run_tick(int mi) {
     Match *mt = &matches[mi];
-    dw2_ship_tick(&mt->ship[0], &mt->ship[1]);
-    dw2_ship_tick(&mt->ship[1], &mt->ship[0]);
+    Dw2EventLog log; memset(&log, 0, sizeof log);
+    dw2_match_tick(&mt->ship[0], &mt->ship[1], mt->elapsed_ticks, &log);
     mt->elapsed_ticks++;
     send_tick(mt);
+    send_events(mt, &log);
     Dw2MatchResult r = dw2_match_result(&mt->ship[0], &mt->ship[1], mt->elapsed_ticks);
     if (r != DW2_RESULT_ONGOING) {
         int reason = (mt->ship[0].hull_pct <= 0.0f || mt->ship[1].hull_pct <= 0.0f) ? DW2_END_HULL : DW2_END_TIMEOUT;
@@ -315,19 +336,18 @@ static void start_combat_if_ready(int mi) {
         const Dw2Ship *you = &mt->ship[s], *opp = &mt->ship[1 - s];
         Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_S_COMBAT_START;
         m.u.combat_start.hull_you = hull_u8(you->hull_pct); m.u.combat_start.hull_opp = hull_u8(opp->hull_pct);
-        m.u.combat_start.armor_you = clamp_u16(you->armor); m.u.combat_start.armor_opp = clamp_u16(opp->armor);
+        m.u.combat_start.armor_you = clamp_u16(you->shield); m.u.combat_start.armor_opp = clamp_u16(opp->shield);
         m.u.combat_start.cargo_you = clamp_u16((float)you->cargo_value); m.u.combat_start.cargo_opp = clamp_u16((float)opp->cargo_value);
         send_msg(ci, &m);
         /* packing was secret; the fight is not: each side now sees the other's ship (OPP_SHIP), and any Panic Cut after this (OPP_CUT) */
         Dw2WireMsg o; memset(&o, 0, sizeof o); o.type = DW2_S_OPP_SHIP;
         o.u.opp_ship.n = (uint8_t)opp->placement_n;
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < DW2_WIRE_MAX_PARTS; i++) {
             o.u.opp_ship.p[i].item = 255;
             if (i < opp->placement_n && opp->placements[i].item_id >= 0) {
                 const Dw2Placement *pl = &opp->placements[i];
                 o.u.opp_ship.p[i].item = (uint8_t)pl->item_id; o.u.opp_ship.p[i].row = (uint8_t)pl->anchor_row;
                 o.u.opp_ship.p[i].col = (uint8_t)pl->anchor_col; o.u.opp_ship.p[i].rot = (uint8_t)pl->rotation;
-                o.u.opp_ship.p[i].cut = (uint8_t)pl->cut;
             }
         }
         send_msg(ci, &o);
@@ -343,6 +363,7 @@ static int start_match(int a, int b) {
     mt->active = 1; mt->id = next_match++; mt->seed = next_seed(); mt->conn[0] = a; mt->conn[1] = b;
     mt->round_call[0] = mt->round_call[1] = -1; /* 0 is a valid DW2_CALL_OVERCHARGE, not "unset" */
     dw2_ship_init(&mt->ship[0]); dw2_ship_init(&mt->ship[1]);
+    mt->ship[1].idx = 1;
     mt->pack_deadline = dw2_now_ms() + (uint64_t)opt_pack_ms;
     for (int s = 0; s < 2; s++) {
         int ci = mt->conn[s], oi = mt->conn[1 - s];
@@ -474,22 +495,22 @@ static void handle_place(int ci, const Dw2WireMsg *m) {
     if (c->state != S_PACKING) { r.type = DW2_S_PLACE_REJECT; r.u.place_reject.reason = DW2_PL_REJ_BAD_STATE; send_msg(ci, &r); return; }
     Match *mt = &matches[c->match];
     int idx = dw2_ship_place(&mt->ship[c->seat], m->u.place.item_id, m->u.place.anchor_row, m->u.place.anchor_col, m->u.place.rotation);
-    if (idx < 0) { r.type = DW2_S_PLACE_REJECT; r.u.place_reject.reason = DW2_PL_REJ_ILLEGAL; send_msg(ci, &r); return; }
+    if (idx < 0) {
+        /* say why: over the credit or weight budget, or simply not a legal place for it */
+        const Dw2Ship *sh = &mt->ship[c->seat];
+        int over = m->u.place.item_id < DW2_ITEM_COUNT && (sh->cost + dw2_catalog[m->u.place.item_id].cost > DW2_BUDGET_CREDITS || sh->weight + dw2_catalog[m->u.place.item_id].weight > DW2_BUDGET_WEIGHT);
+        r.type = DW2_S_PLACE_REJECT; r.u.place_reject.reason = over ? DW2_PL_REJ_BUDGET : DW2_PL_REJ_ILLEGAL; send_msg(ci, &r); return;
+    }
     r.type = DW2_S_PLACE_ACK; r.u.place_ack.placement_idx = (uint8_t)idx; send_msg(ci, &r);
 }
 
+/* Ruleset 1 let a player Panic-Cut a part in place (and live in the fight). Ruleset 2 has no such order: a Titanium Beam or Aether Ore is split into
+ * ordinary Shards / Chips by the client, which places those instead (core/items.h dw2_split_pieces). The opcode stays on the wire so an old client is refused
+ * cleanly rather than disconnected. */
 static void handle_cut(int ci, const Dw2WireMsg *m) {
-    Conn *c = &conns[ci];
+    (void)m;
     Dw2WireMsg r; memset(&r, 0, sizeof r);
-    if (c->state != S_PACKING && c->state != S_COMBAT) { r.type = DW2_S_CUT_REJECT; r.u.cut_reject.reason = DW2_CUT_REJ_BAD_STATE; send_msg(ci, &r); return; }
-    Match *mt = &matches[c->match];
-    int ok = dw2_ship_panic_cut(&mt->ship[c->seat], m->u.cut.placement_idx);
-    if (!ok) { r.type = DW2_S_CUT_REJECT; r.u.cut_reject.reason = DW2_CUT_REJ_ILLEGAL; send_msg(ci, &r); return; }
-    r.type = DW2_S_CUT_ACK; r.u.cut_ack.placement_idx = m->u.cut.placement_idx; send_msg(ci, &r);
-    if (c->state == S_COMBAT) {
-        Dw2WireMsg o; memset(&o, 0, sizeof o); o.type = DW2_S_OPP_CUT; o.u.opp_cut.placement_idx = m->u.cut.placement_idx;
-        send_msg(mt->conn[1 - c->seat], &o);
-    }
+    r.type = DW2_S_CUT_REJECT; r.u.cut_reject.reason = DW2_CUT_REJ_ILLEGAL; send_msg(ci, &r);
 }
 
 /* DW2_C_ROUND_CALL: legal only while c->state == S_COMBAT AND the match is actually mid-round-

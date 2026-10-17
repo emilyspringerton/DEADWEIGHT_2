@@ -71,12 +71,21 @@ int dw2_encode(const Dw2WireMsg *m, uint8_t *buf, size_t cap) {
         break;
     case DW2_S_OPP_SHIP:
         w8(&w, m->u.opp_ship.n);
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < DW2_WIRE_MAX_PARTS; i++) {
             w8(&w, m->u.opp_ship.p[i].item); w8(&w, m->u.opp_ship.p[i].row); w8(&w, m->u.opp_ship.p[i].col);
-            w8(&w, m->u.opp_ship.p[i].rot); w8(&w, m->u.opp_ship.p[i].cut);
+            w8(&w, m->u.opp_ship.p[i].rot);
         }
         break;
     case DW2_S_OPP_CUT: w8(&w, m->u.opp_cut.placement_idx); break;
+    case DW2_S_EVENTS:
+        if (m->u.events.n > DW2_WIRE_MAX_EVENTS) return -1;
+        w8(&w, m->u.events.tick); w8(&w, m->u.events.n); w8(&w, m->u.events.dropped);
+        w16(&w, m->u.events.structure_you); w16(&w, m->u.events.structure_opp);
+        for (int i = 0; i < m->u.events.n; i++) {
+            w8(&w, m->u.events.ev[i].type); w8(&w, m->u.events.ev[i].side); w8(&w, m->u.events.ev[i].a); w8(&w, m->u.events.ev[i].b);
+            w8(&w, m->u.events.ev[i].c); w8(&w, m->u.events.ev[i].d); w8(&w, m->u.events.ev[i].e);
+        }
+        break;
     case DW2_S_ERROR: w8(&w, m->u.error.code); break;
     default: return -1;
     }
@@ -97,7 +106,8 @@ static int payload_size(uint8_t t) {
     case DW2_S_CUT_ACK: return 1; case DW2_S_CUT_REJECT: return 1;
     case DW2_S_COMBAT_START: return 10; case DW2_S_TICK: return 9; case DW2_S_MATCH_END: return 7;
     case DW2_S_ROUND_BREAK: return 6; case DW2_C_ROUND_CALL: return 1; case DW2_S_ROUND_RESULT: return 6;
-    case DW2_S_OPP_SHIP: return 81; case DW2_S_OPP_CUT: return 1;
+    case DW2_S_OPP_SHIP: return 1 + 4 * DW2_WIRE_MAX_PARTS; case DW2_S_OPP_CUT: return 1;
+    case DW2_S_EVENTS: return -4;
     case DW2_S_ERROR: return 1; default: return -1;
     }
 }
@@ -114,6 +124,7 @@ int dw2_decode(const uint8_t *buf, size_t len, Dw2WireMsg *out, size_t *consumed
     if (ps >= 0 && (size_t)ps != plen) return -1;
     if (ps == -2 && plen < 19) return -1;
     if (ps == -3 && plen < 2) return -1;
+    if (ps == -4 && (plen < 7 || plen != 7 + 7 * (size_t)buf[4] || buf[4] > DW2_WIRE_MAX_EVENTS)) return -1;
     R r = { buf + 3, plen, 0 };
     memset(out, 0, sizeof *out);
     out->type = type;
@@ -169,12 +180,20 @@ int dw2_decode(const uint8_t *buf, size_t len, Dw2WireMsg *out, size_t *consumed
         break;
     case DW2_S_OPP_SHIP:
         out->u.opp_ship.n = (uint8_t)r8(&r);
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < DW2_WIRE_MAX_PARTS; i++) {
             out->u.opp_ship.p[i].item = (uint8_t)r8(&r); out->u.opp_ship.p[i].row = (uint8_t)r8(&r); out->u.opp_ship.p[i].col = (uint8_t)r8(&r);
-            out->u.opp_ship.p[i].rot = (uint8_t)r8(&r); out->u.opp_ship.p[i].cut = (uint8_t)r8(&r);
+            out->u.opp_ship.p[i].rot = (uint8_t)r8(&r);
         }
         break;
     case DW2_S_OPP_CUT: out->u.opp_cut.placement_idx = (uint8_t)r8(&r); break;
+    case DW2_S_EVENTS:
+        out->u.events.tick = (uint8_t)r8(&r); out->u.events.n = (uint8_t)r8(&r); out->u.events.dropped = (uint8_t)r8(&r);
+        out->u.events.structure_you = (uint16_t)r16(&r); out->u.events.structure_opp = (uint16_t)r16(&r);
+        for (int i = 0; i < out->u.events.n; i++) {
+            out->u.events.ev[i].type = (uint8_t)r8(&r); out->u.events.ev[i].side = (uint8_t)r8(&r); out->u.events.ev[i].a = (uint8_t)r8(&r);
+            out->u.events.ev[i].b = (uint8_t)r8(&r); out->u.events.ev[i].c = (uint8_t)r8(&r); out->u.events.ev[i].d = (uint8_t)r8(&r); out->u.events.ev[i].e = (uint8_t)r8(&r);
+        }
+        break;
     case DW2_S_ERROR: out->u.error.code = (uint8_t)r8(&r); break;
     default: return -1;
     }

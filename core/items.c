@@ -1,17 +1,8 @@
 #include "items.h"
 
-int dw2_concat_fragments(const Dw2ItemDef *def, Dw2Cell *out) {
-    int n = dw2_fragment_count(def->split_class);
-    int total = 0;
-    for (int f = 0; f < n; f++)
-        for (int i = 0; i < def->frag_n[f]; i++)
-            out[total++] = def->frag[f][i];
-    return total;
-}
-
 dw2_mask dw2_shape_cells(const Dw2Cell *cells, int n, int rotation, int anchor_row, int anchor_col,
                           Dw2PlacedCell *out) {
-    int rdx[DW2_MAX_CUT_CELLS], rdy[DW2_MAX_CUT_CELLS];
+    int rdx[DW2_MAX_ITEM_CELLS], rdy[DW2_MAX_ITEM_CELLS];
     int min_dx = 0, min_dy = 0;
     rotation = ((rotation % 4) + 4) % 4;
     for (int i = 0; i < n; i++) {
@@ -35,143 +26,162 @@ dw2_mask dw2_shape_cells(const Dw2Cell *cells, int n, int rotation, int anchor_r
     return mask;
 }
 
-/* Fragment tables (SPEC_REVIEW.md §1): authored per item, each fragment costs MORE total grid
- * space than the whole item did (the actual fragmentation tax) -- a fragment's own Dead Square
- * cells make up the difference and become armor at combat time (NORTHSTAR.md). Both worked
- * examples from the spec review's own table are reproduced faithfully below (Titanium Beam
- * halves, Aether Ore quarters); Generator/Conductor/Splitter/Railgun/Bulwark are unsplittable
- * functional pieces (splitting a weapon or a wire mid-fight isn't a meaningful choice for V0). */
+int dw2_split_pieces(int item, int rotation, int anchor_row, int anchor_col, Dw2SplitPiece *out) {
+    if (item < 0 || item >= DW2_ITEM_COUNT) return 0;
+    const Dw2ItemDef *d = &dw2_catalog[item];
+    if (d->split_item < 0 || d->split_n <= 0) return 0;
+    Dw2PlacedCell pc[DW2_MAX_ITEM_CELLS];
+    dw2_shape_cells(d->base, d->base_n, rotation, anchor_row, anchor_col, pc);
+    for (int k = 0; k < d->split_n; k++) {
+        int r0 = 99, c0 = 99;
+        for (int i = 0; i < d->base_n; i++)
+            if (d->split_of[i] == k) { if (pc[i].row < r0) r0 = pc[i].row; if (pc[i].col < c0) c0 = pc[i].col; }
+        out[k].item = d->split_item; out[k].row = r0; out[k].col = c0; out[k].rotation = rotation;
+    }
+    return d->split_n;
+}
+
+/* The catalog. Numbers: cost in credits, weight in tons, hp per cell; the three multipliers are what a laser / railgun slug / cannon shell does to a cell of
+ * this part as a fraction of its damage. A budget of 1000 credits and 40 tons is a ship of about a dozen parts. */
 const Dw2ItemDef dw2_catalog[DW2_ITEM_COUNT] = {
-    [0] = {
-        .name = "Generator", .kind = DW2_KIND_OPERATIONS, .value = 200,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_GENERATOR] = {
+        .name = "Generator", .kind = DW2_KIND_OPERATIONS, .cost = 100, .weight = 4, .hp = 20,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_E, DW2_ROLE_GENERATOR } },
     },
-    [1] = {
-        .name = "Conductor", .kind = DW2_KIND_OPERATIONS, .value = 40,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_CONDUCTOR] = {
+        .name = "Conductor", .kind = DW2_KIND_OPERATIONS, .cost = 10, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_CONDUCTOR } },
     },
-    [2] = {
-        .name = "Splitter Node", .kind = DW2_KIND_OPERATIONS, .value = 120,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_SPLITTER] = {
+        .name = "Splitter Node", .kind = DW2_KIND_OPERATIONS, .cost = 25, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         /* one input (W), two outputs (N,S) -- one-to-many is legal (SPEC_REVIEW.md §3) */
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_N | DW2_PORT_S, DW2_ROLE_SPLITTER } },
     },
-    [3] = {
-        .name = "Railgun", .kind = DW2_KIND_OFFENSE, .value = 300,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_RAILGUN] = {
+        /* A slug that goes THROUGH: it punches the first part in its lane and what it did not spend carries on to the next. Fires through its own ship. */
+        .name = "Railgun", .kind = DW2_KIND_OFFENSE, .cost = 240, .weight = 9, .hp = 30,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON } },
     },
-    [4] = {
-        .name = "Bulwark Plate", .kind = DW2_KIND_DEFENSE, .value = 250,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_BULWARK] = {
+        /* A plate: 45 HP a cell and lasers do half to it. The all-round wall. */
+        .name = "Bulwark Plate", .kind = DW2_KIND_DEFENSE, .cost = 55, .weight = 5, .hp = 45,
+        .x_laser = 0.5f, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, 0, DW2_ROLE_ARMOR } },
     },
-    [5] = {
-        /* Titanium Beam (1x4 line) | Halves | fragment 1x3 (2 base + 1 dead) -- SPEC_REVIEW.md §1
-         * table, verbatim. Base: 4 cells in a row. Each half-fragment needs its OWN row (3 cells
-         * doesn't fit inside the original 4-cell line alongside its twin) -- the fragmentation tax
-         * made concrete as "you now need floor space you didn't need before," not just a number. */
-        .name = "Titanium Beam", .kind = DW2_KIND_OFFENSE, .value = 180,
-        .split_class = DW2_SPLIT_HALVABLE, .base_n = 4,
-        .base = { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE },
-                  { 2, 0, 0, DW2_ROLE_NONE }, { 3, 0, 0, DW2_ROLE_NONE } },
-        .frag_n = { 3, 3 },
-        .frag = {
-            { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE }, { 2, 0, 0, DW2_ROLE_DEAD } },
-            { { 0, 1, 0, DW2_ROLE_NONE }, { 1, 1, 0, DW2_ROLE_NONE }, { 2, 1, 0, DW2_ROLE_DEAD } },
-        },
+    [DW2_ITEM_TITANIUM_BEAM] = {
+        /* A 1x4 bar of hard alloy: slugs do half to it, and every weapon touching it hits x1.5 as hard. Splits into two Titanium Shards. */
+        .name = "Titanium Beam", .kind = DW2_KIND_OFFENSE, .cost = 90, .weight = 8, .hp = 20,
+        .x_laser = 1, .x_rail = 0.5f, .x_cannon = 1, .family = DW2_FAM_TITANIUM, .boost = 1.5f,
+        .split_item = DW2_ITEM_TITANIUM_SHARD, .split_n = 2, .split_of = { 0, 0, 1, 1 }, .base_n = 4,
+        .base = { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE }, { 2, 0, 0, DW2_ROLE_NONE }, { 3, 0, 0, DW2_ROLE_NONE } },
     },
-    [6] = {
-        /* Aether Ore (2x2 square) | Quarters | fragment 1x2 (1 base + 1 dead) -- SPEC_REVIEW.md §1
-         * table, verbatim. Four fragments stacked into four rows below the anchor: 2x2=4 cells
-         * becomes 4x2=8 cells post-cut, the largest fragmentation tax in the V0 catalog. */
-        .name = "Aether Ore", .kind = DW2_KIND_DEFENSE, .value = 220,
-        .split_class = DW2_SPLIT_QUARTERABLE, .base_n = 4,
-        .base = { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE },
-                  { 0, 1, 0, DW2_ROLE_NONE }, { 1, 1, 0, DW2_ROLE_NONE } },
-        .frag_n = { 2, 2, 2, 2 },
-        .frag = {
-            { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_DEAD } },
-            { { 0, 1, 0, DW2_ROLE_NONE }, { 1, 1, 0, DW2_ROLE_DEAD } },
-            { { 0, 2, 0, DW2_ROLE_NONE }, { 1, 2, 0, DW2_ROLE_DEAD } },
-            { { 0, 3, 0, DW2_ROLE_NONE }, { 1, 3, 0, DW2_ROLE_DEAD } },
-        },
+    [DW2_ITEM_AETHER_ORE] = {
+        /* A 2x2 crystal: a prism that scatters beams (lasers do a fifth to it) but shatters under shells; an Aegis Emitter touching it works x1.5.
+         * Splits into four Ore Chips. */
+        .name = "Aether Ore", .kind = DW2_KIND_DEFENSE, .cost = 100, .weight = 6, .hp = 15,
+        .x_laser = 0.2f, .x_rail = 1, .x_cannon = 1.5f, .family = DW2_FAM_AETHER, .boost = 1.5f,
+        .split_item = DW2_ITEM_ORE_CHIP, .split_n = 4, .split_of = { 0, 1, 2, 3 }, .base_n = 4,
+        .base = { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE }, { 0, 1, 0, DW2_ROLE_NONE }, { 1, 1, 0, DW2_ROLE_NONE } },
     },
-    [7] = {
-        /* Pulse Laser: a fast, light weapon. 10 energy fires it, so a fed laser shoots every tick; each shot is 3 damage that
-         * goes straight to the hull (armor does not stop it). The answer to a ship hiding behind Bulwark Plates. */
-        .name = "Pulse Laser", .kind = DW2_KIND_OFFENSE, .value = 260,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_PULSE_LASER] = {
+        /* A fast, light beam: 10 W fires it every second for 4. It needs a clear lane (nothing of yours in front of it) and cannot be dodged. */
+        .name = "Pulse Laser", .kind = DW2_KIND_OFFENSE, .cost = 120, .weight = 3, .hp = 35,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON } },
     },
-    [8] = {
-        /* Siege Cannon: a 1x2 heavy weapon. Fed at its west end; the barrel is the second cell. 50 energy per shot, 30 damage
-         * that armor absorbs: a fed cannon fires on seconds 5, 10, 15 ... just ahead of each round break. */
-        .name = "Siege Cannon", .kind = DW2_KIND_OFFENSE, .value = 320,
-        .split_class = DW2_SPLIT_NONE, .base_n = 2,
+    [DW2_ITEM_SIEGE_CANNON] = {
+        /* A 1x2 mortar: fed at its west end, the barrel is the second cell. Its shell comes down from above on the DEEPEST part in the lane, over any wall. */
+        .name = "Siege Cannon", .kind = DW2_KIND_OFFENSE, .cost = 230, .weight = 10, .hp = 30,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 2,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_WEAPON }, { 1, 0, 0, DW2_ROLE_NONE } },
     },
-    [9] = {
-        /* Amplifier: a wire with gain. Everything downstream of it gets DW2_AMPLIFIER_GAIN times the energy. */
-        .name = "Amplifier", .kind = DW2_KIND_OPERATIONS, .value = 150,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_AMPLIFIER] = {
+        .name = "Amplifier", .kind = DW2_KIND_OPERATIONS, .cost = 90, .weight = 2, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_AMPLIFIER } },
     },
-    [10] = {
-        /* Mender: fed from its west side, it mends 2 hull every second. The answer to lasers, which armor cannot stop. */
-        .name = "Mender", .kind = DW2_KIND_OPERATIONS, .value = 200,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_MENDER] = {
+        /* Fed, it mends 2 hull a second per 10 W. */
+        .name = "Mender", .kind = DW2_KIND_OPERATIONS, .cost = 130, .weight = 3, .hp = 15,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_MENDER } },
     },
-    [11] = {
-        /* Aegis Emitter: fed from its west side, it recharges 3 armor every second, back up to the armor the ship started with.
-         * The answer to railguns and cannons, which armor does stop. */
-        .name = "Aegis Emitter", .kind = DW2_KIND_DEFENSE, .value = 220,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_AEGIS] = {
+        /* Fed, it repairs 4 HP a second per 10 W to the part in its 3x3 that is closest to breaking (x1.5 touching Aether Ore). */
+        .name = "Aegis Emitter", .kind = DW2_KIND_DEFENSE, .cost = 140, .weight = 3, .hp = 15,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W, DW2_ROLE_AEGIS } },
     },
-    [12] = {
-        /* Resistor 1 ohm: a wire that lets 75% of the power through. Aimed at a Capacitor it slows the charge, so the burst comes later. */
-        .name = "Resistor 1R", .kind = DW2_KIND_OPERATIONS, .value = 60,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_RESISTOR_1] = {
+        .name = "Resistor 1R", .kind = DW2_KIND_OPERATIONS, .cost = 20, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_RESISTOR } },
     },
-    [13] = {
-        .name = "Resistor 2R", .kind = DW2_KIND_OPERATIONS, .value = 70,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_RESISTOR_2] = {
+        .name = "Resistor 2R", .kind = DW2_KIND_OPERATIONS, .cost = 20, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_RESISTOR } },
     },
-    [14] = {
-        .name = "Resistor 4R", .kind = DW2_KIND_OPERATIONS, .value = 80,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_RESISTOR_4] = {
+        .name = "Resistor 4R", .kind = DW2_KIND_OPERATIONS, .cost = 20, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_RESISTOR } },
     },
-    [15] = {
-        /* Capacitor: takes in whatever it is fed and holds it; at 30 stored it lets all of it go in a single tick. A way to choose WHEN power arrives. */
-        .name = "Capacitor", .kind = DW2_KIND_OPERATIONS, .value = 140,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_CAPACITOR] = {
+        .name = "Capacitor", .kind = DW2_KIND_OPERATIONS, .cost = 70, .weight = 2, .hp = 15,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_CAPACITOR } },
     },
-    [16] = {
-        /* Battery: starts half charged, gives up to 15 a tick to whatever it touches, and recharges from whatever feeds it. Keeps a gun
-         * firing after its generator is gone, and banks surplus when you feed it more than it gives. */
-        .name = "Battery", .kind = DW2_KIND_OPERATIONS, .value = 180,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_BATTERY] = {
+        .name = "Battery", .kind = DW2_KIND_OPERATIONS, .cost = 110, .weight = 4, .hp = 20,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_BATTERY } },
     },
-    [17] = {
-        /* Transistor: a T. The two opposite sides are the channel (power in one, out the other); the stem is the gate. While the gate
-         * was fed on the previous tick (2 or more) the channel conducts; otherwise it is shut. A trickle can switch a flood. */
-        .name = "Transistor", .kind = DW2_KIND_OPERATIONS, .value = 200,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_TRANSISTOR] = {
+        .name = "Transistor", .kind = DW2_KIND_OPERATIONS, .cost = 80, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E | DW2_PORT_N, DW2_ROLE_TRANSISTOR } },
     },
-    [18] = {
-        /* Delayer: what goes in comes out two ticks later. */
-        .name = "Delayer", .kind = DW2_KIND_OPERATIONS, .value = 160,
-        .split_class = DW2_SPLIT_NONE, .base_n = 1,
+    [DW2_ITEM_DELAYER] = {
+        .name = "Delayer", .kind = DW2_KIND_OPERATIONS, .cost = 60, .weight = 1, .hp = 10,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 1,
         .base = { { 0, 0, DW2_PORT_W | DW2_PORT_E, DW2_ROLE_DELAYER } },
+    },
+    [DW2_ITEM_QUANTUM_CORE] = {
+        /* A 2x2 reactor: each of its four cells is a 10 W source with an output on each of its two outer sides, so 40 W in the space of four Generators... but it
+         * runs HOT. Every cell that touches it takes 2 heat damage a second unless it is cooled (a Cryo-Vent, or a cell touching one). */
+        .name = "Quantum Core", .kind = DW2_KIND_OPERATIONS, .cost = 320, .weight = 10, .hp = 25,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .heat = 2, .split_item = -1, .base_n = 4,
+        .base = { { 0, 0, DW2_PORT_N | DW2_PORT_W, DW2_ROLE_GENERATOR }, { 1, 0, DW2_PORT_N | DW2_PORT_E, DW2_ROLE_GENERATOR },
+                  { 0, 1, DW2_PORT_S | DW2_PORT_W, DW2_ROLE_GENERATOR }, { 1, 1, DW2_PORT_S | DW2_PORT_E, DW2_ROLE_GENERATOR } },
+    },
+    [DW2_ITEM_CRYO_VENT] = {
+        .name = "Cryo-Vent", .kind = DW2_KIND_DEFENSE, .cost = 60, .weight = 3, .hp = 20,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 2,
+        .base = { { 0, 0, 0, DW2_ROLE_COOLANT }, { 1, 0, 0, DW2_ROLE_COOLANT } },
+    },
+    [DW2_ITEM_BIOMASS] = {
+        /* A bent four-cell colony that grows back what it touches: +2 HP a second to each neighbouring cell of another part (+1 to its own). No power needed. */
+        .name = "Xeno-Biomass", .kind = DW2_KIND_DEFENSE, .cost = 90, .weight = 4, .hp = 15,
+        .x_laser = 1, .x_rail = 1, .x_cannon = 1, .split_item = -1, .base_n = 4,
+        .base = { { 0, 0, 0, DW2_ROLE_BIOMASS }, { 0, 1, 0, DW2_ROLE_BIOMASS }, { 0, 2, 0, DW2_ROLE_BIOMASS }, { 1, 2, 0, DW2_ROLE_BIOMASS } },
+    },
+    [DW2_ITEM_TITANIUM_SHARD] = {
+        /* Half a Beam: two cells that still turn slugs, but boost the weapons they touch only x1.25, and cost and weigh more than half a Beam. */
+        .name = "Titanium Shard", .kind = DW2_KIND_OFFENSE, .cost = 55, .weight = 5, .hp = 20,
+        .x_laser = 1, .x_rail = 0.5f, .x_cannon = 1, .family = DW2_FAM_TITANIUM, .boost = 1.25f,
+        .split_item = -1, .base_n = 2,
+        .base = { { 0, 0, 0, DW2_ROLE_NONE }, { 1, 0, 0, DW2_ROLE_NONE } },
+    },
+    [DW2_ITEM_ORE_CHIP] = {
+        /* A quarter of an Aether Ore: one cell that still scatters beams; an Aegis touching it works x1.25. */
+        .name = "Ore Chip", .kind = DW2_KIND_DEFENSE, .cost = 30, .weight = 2, .hp = 15,
+        .x_laser = 0.2f, .x_rail = 1, .x_cannon = 1.5f, .family = DW2_FAM_AETHER, .boost = 1.25f,
+        .split_item = -1, .base_n = 1,
+        .base = { { 0, 0, 0, DW2_ROLE_NONE } },
     },
 };

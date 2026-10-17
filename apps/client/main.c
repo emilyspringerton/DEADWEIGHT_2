@@ -57,7 +57,7 @@ typedef enum { CS_CONNECTING, CS_QUEUED, CS_PACKING, CS_COMBAT, CS_DONE, CS_ERRO
 
 typedef struct { Uint8 r, g, b; } Col;
 static const Col COL_BG = { 18, 20, 28 }, COL_CURSOR = { 255, 255, 255 },
-    COL_RUINED = { 90, 30, 30 }, COL_BLOCKADE = { 10, 10, 10 }, COL_PANEL = { 40, 42, 55 };
+    COL_BLOCKADE = { 10, 10, 10 }, COL_PANEL = { 40, 42, 55 };
 static const Col COL_KIND[3] = { { 215, 70, 60 }, { 225, 160, 40 }, { 70, 140, 230 } };
 static const Col COL_GENERATOR = { 80, 220, 120 }, COL_CONDUCTOR = { 200, 200, 210 },
     COL_SPLITTER = { 80, 210, 220 }, COL_WEAPON = { 240, 90, 40 }, COL_ARMOR = { 90, 140, 240 },
@@ -93,7 +93,6 @@ static void draw_ship(const Dw2Ship *s, int origin_x, int origin_y, int cursor_r
             int x = origin_x + col * CELL_PX, y = origin_y + row * CELL_PX;
             Col bg = COL_BG;
             if (s->grid.blockade & dw2_bit(cell)) bg = COL_BLOCKADE;
-            else if (s->grid.ruined & dw2_bit(cell)) bg = COL_RUINED;
             rect(x, y, CELL_PX - 2, CELL_PX - 2, bg);
         }
     }
@@ -193,13 +192,10 @@ static void try_place(int item, int row, int col, int rot) {
     m.u.place.anchor_col = (uint8_t)col; m.u.place.rotation = (uint8_t)rot;
     send_msg(&m);
 }
+/* Ruleset 2 has no Panic Cut: a Titanium Beam or Aether Ore is split into ordinary Shards / Chips by placing those (core/items.h dw2_split_pieces). */
 static void try_cut(int placement_idx) {
-    if (placement_idx < 0) return;
-    int ok = dw2_ship_panic_cut(&player, placement_idx);
-    if (!ok) { printf("Panic Cut failed (idx %d, no room for fragments or already cut)\n", placement_idx); return; }
-    printf("Panic Cut! idx %d fragmented.\n", placement_idx);
-    Dw2WireMsg m; memset(&m, 0, sizeof m); m.type = DW2_C_PANIC_CUT; m.u.cut.placement_idx = (uint8_t)placement_idx;
-    send_msg(&m);
+    (void)placement_idx;
+    printf("Panic Cut is retired in ruleset 2 (place Titanium Shards / Ore Chips instead)\n");
 }
 static void send_ready(void) {
     if (ready_sent) return;
@@ -227,9 +223,7 @@ static void handle_server_msg(const Dw2WireMsg *m) {
         if (selftest_mode) {
             if (!selftest_empty) {
                 try_place(DW2_ITEM_GENERATOR, 0, 0, 0);
-                try_place(DW2_ITEM_CONDUCTOR, 0, 1, 0);
-                try_place(DW2_ITEM_RAILGUN, 0, 2, 0);
-                try_place(DW2_ITEM_BULWARK, 3, 3, 0);
+                try_place(DW2_ITEM_PULSE_LASER, 0, 1, 0);
             }
             send_ready();
         }
@@ -255,6 +249,7 @@ static void handle_server_msg(const Dw2WireMsg *m) {
                m->u.tick.armor_you, m->u.tick.armor_opp, m->u.tick.shatter_you, m->u.tick.shatter_opp);
         break;
     case DW2_S_OPP_SHIP: printf("OPP_SHIP n=%u (the opponent's ship; this debug client does not draw it)\n", m->u.opp_ship.n); break;
+    case DW2_S_EVENTS: break;   /* what the second did: the browser client animates it; this debug client only reads the scalars */
     case DW2_S_OPP_CUT: printf("OPP_CUT idx=%u\n", m->u.opp_cut.placement_idx); break;
     case DW2_S_MATCH_END:
         match_result = m->u.match_end.result; match_reason = m->u.match_end.reason; match_ticks = m->u.match_end.ticks;

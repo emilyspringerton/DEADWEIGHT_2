@@ -22,28 +22,27 @@ int main(void) {
     dw2_ship_start_combat(&attacker);
     Dw2Ship target; dw2_ship_init(&target); dw2_ship_start_combat(&target);
     /* Target never fires back (no weapon placed) and starts at full hull -- attacker is never
-     * `behind` and this shot is never `overkill` (100 > DW2_WEAPON_DAMAGE), so cannon_bank_on_safe_
+     * `behind` and this shot is never `overkill` (100 > the 30-damage slug), so cannon_bank_on_safe_
      * lead's real, compiled decision is HOLD (state 0) every tick charge is ready. */
 
-    dw2_ship_tick(&attacker, &target); CHECK(target.hull_pct == 100.0f); /* tick 1: charge 0->10 */
-    dw2_ship_tick(&attacker, &target); CHECK(target.hull_pct == 100.0f); /* tick 2: charge 10->20 */
-    dw2_ship_tick(&attacker, &target); /* tick 3: charge 20->30, >=threshold, decide() -> HOLD */
+    dw2_ship_tick(&attacker, &target, NULL); CHECK(target.hull_pct == 100.0f); /* tick 1: charge 0->10 */
+    dw2_ship_tick(&attacker, &target, NULL); CHECK(target.hull_pct == 100.0f); /* tick 2: charge 10->20 */
+    dw2_ship_tick(&attacker, &target, NULL); /* tick 3: charge 20->30, >=threshold, decide() -> HOLD */
     CHECK(target.hull_pct == 100.0f); /* held, not fired */
     CHECK(attacker.weapon_charge[2] == 30.0f); /* NOT reset by the threshold subtraction; the
                                                  * Generator keeps feeding it regardless of the fire
-                                                 * decision (dw2_ship_tick's own energy-routing phase
-                                                 * runs before the fire decision, unconditionally) --
-                                                 * a real, named consequence of this V0 having no
-                                                 * charge cap, not a bug (docs/LO_CANNON_PROGRAMMING.md). */
-    dw2_ship_tick(&attacker, &target); /* tick 4: charge 30->40, still HOLD, still no cap */
+                                                 * decision (the energy-routing phase runs before the
+                                                 * fire decision, unconditionally), up to a cap of
+                                                 * twice the threshold (docs/LO_CANNON_PROGRAMMING.md). */
+    dw2_ship_tick(&attacker, &target, NULL); /* tick 4: charge 30->40, still HOLD, still no cap */
     CHECK(target.hull_pct == 100.0f);
     CHECK(attacker.weapon_charge[2] == 40.0f);
 
     /* Now simulate some other source of damage already having brought the target into this shot's
      * own overkill range (<= DW2_WEAPON_DAMAGE) -- the SAME decision program must switch to FIRE. */
     target.hull_pct = 10.0f;
-    dw2_ship_tick(&attacker, &target); /* tick 5: charge 40->50, overkill=true -> decide() -> FIRE */
-    CHECK(target.hull_pct == 0.0f); /* 10 - 15, clamped */
+    dw2_ship_tick(&attacker, &target, NULL); /* tick 5: charge 40->50, overkill=true -> decide() -> FIRE */
+    CHECK(target.hull_pct == 0.0f); /* a slug of 30 on an empty lane does 15 to the hull: 10 - 15, clamped */
     CHECK(attacker.weapon_charge[2] == 20.0f); /* the threshold-subtraction DID run this time: 50-30 */
 
     printf("test_cannon_hold: %d checks, %d failures\n", g_checks, g_failures);

@@ -49,7 +49,7 @@ Dw2RoundEffect dw2_round_grade(uint32_t match_seed, int round_no, int call, int 
 
 void dw2_ship_apply_round_effect(Dw2Ship *s, Dw2RoundEffect e) {
     s->dmg_mult = e.dmg_mult;
-    if (e.armor_bonus > 0.0f) { s->armor += e.armor_bonus; s->armor_max += e.armor_bonus; }
+    if (e.armor_bonus > 0.0f) s->shield += e.armor_bonus;   /* Brace: a shield that soaks damage before any part does */
     if (e.self_damage > 0.0f) {
         s->hull_pct -= e.self_damage;
         if (s->hull_pct < 0.0f) s->hull_pct = 0.0f;
