@@ -8,7 +8,7 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 TAG="${1:-$(git -C "$SRC" rev-parse --short HEAD)}"
 PROJECT="${PROJECT:-project-d24a71e9-2daf-4b2d-917}"
 CTX="$(mktemp -d)"; trap 'rm -rf "$CTX"' EXIT
-git -C "$SRC" ls-files -z -- core apps/server cannon | (cd "$SRC" && xargs -0 -r tar cf - 2>/dev/null) | tar xf - -C "$CTX"
+git -C "$SRC" ls-files -z -- core apps/server apps/bot cannon | (cd "$SRC" && xargs -0 -r tar cf - 2>/dev/null) | tar xf - -C "$CTX"
 cp "$SRC/ops/docker/dw2.Dockerfile" "$CTX/Dockerfile"
 
 BUILD_ID=$(gcloud builds submit "$CTX" --project "$PROJECT" \
