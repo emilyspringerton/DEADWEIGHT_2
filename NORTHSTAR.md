@@ -1,5 +1,9 @@
 # DEADWEIGHT_2 — the backpack battler, spun out on its own
 
+> **Ruleset 2 (2026-10-17) supersedes the V0 rules this document first described.** The 7-item catalog, the 16-part limit, the armour scalar, Ruined Real Estate and the
+> Panic Cut below are historical: a ship now carries 1000 credits and 40 tons of 24 parts, every cell has HP, shots fly down lanes and hit parts, and a part is split
+> in place instead of cut. See the "Ruleset 2" section below and `docs/RULESET_2.md`. The original design sections are kept as the record of how it got here.
+
 ## What this is and why it's a separate repo
 
 `DEADWEIGHT` (the sibling repo in this monorepo) shipped VS0 — a card-mode 1v1 game — first,
@@ -30,7 +34,7 @@ unresolved here, not an oversight; see `CLAUDE.md`.
   implements: **local-only, zero networking/accounts/UI-polish, one human vs. one fixed dummy
   grid**, to prove the mechanic is fun before a server or a second client exists.
 
-## What's actually built here (Phase D1 — done, live-verified)
+## What's actually built here (Phase D1 — done, live-verified; HISTORICAL, the rules are now ruleset 2)
 
 - `core/grid.h` — the 6x6 triple-bitmask grid (Occupancy/Blockade/Ruined Real Estate), the
   transcript's own `M_Item & (M_O|M_B|M_R) == 0` legality formula adopted as-is, and the resolved
@@ -67,7 +71,7 @@ hand-derived and cross-checked against the actual running binary, not just asser
 deliberately-built closed loop shatters (not crashes or silently no-ops), a mid-fight Panic Cut
 changes live routing, and the fuzz pass runs clean under ASan+UBSan.
 
-## Real, named simplifications in this V0 slice (not oversights)
+## Real, named simplifications in this V0 slice (not oversights; HISTORICAL)
 
 - **Back-EMF tracks one combined loop region per ship, not independently-many.** If a player
   builds two simultaneous, physically distinct closed loops in the same tick, they're detected
@@ -228,6 +232,29 @@ mechanical payoff in this V0 (a real, honestly-discovered failure mode, named in
 not glossed over). Real, honest finding: LO's own already-named stdlib gaps (matrices, PCRE
 matching) turned out to be unrelated to this feature — zero new LO stdlib work was needed here.
 
+## Ruleset 2: budgets, lanes and HP, in place of a part limit and an armour number (2026-10-17)
+
+Founder real-time, after playing the browser client (WOTAN `/d2/play.html`): damage came in ticks "all of a sudden i will drop from full health to dead"; the Titanium bar and
+Aether Ore had no visible point ("its not obvious what any of it is doing or why position matters"); "you don't have enough components for it to matter! why is there a limit
+to the amount of components? all components need to have a cost and a weight ... and the position of all of the components needs to be significant and all of it needs to
+read to the player without you having to explain it"; cutting "folds it over with a second one ... something is happening but it's not clear what"; "4 lasers and the rest
+bulwarks wins every time ... there needs to be counter play ... there were a lot more components" in the source conversation.
+
+What was built (`docs/RULESET_2.md` has the numbers):
+
+- **A budget instead of a part limit.** 1000 credits and 40 tons; every part has a cost and a weight (so a Railgun is 240 cr / 9 t and a Conductor 10 cr / 1 t), and the only
+  cap on the number of parts is the 36 cells. The weight budget also sets the dodge chance, so a light ship is a different kind of ship, not a worse one.
+- **Position is the whole game.** Shots fly down lanes and hit *parts* (first part, through the lane, or the deepest part), parts have HP, a destroyed part stops conducting,
+  firing and shielding, Titanium boosts the guns it touches, an Aegis works harder beside Aether Ore, a Quantum Core burns what it touches unless a Cryo-Vent does, Biomass
+  heals its neighbours. The client shows the lane table ("shots to open") and the boosts while packing, so the player reads the consequence of a placement before the fight.
+- **The founding transcript's catalog, in part.** Quantum Core, Cryo-Vent, Xeno-Biomass, Titanium and Aether materials and the fragmentation tax (the pieces of a split part
+  cost and weigh more) came from `DEADWEIGHT/LeetCode Skills Course Curriculum.pdf`; 24 of its parts exist now. Still deferred from that document: Ultimates, 2v2, the options
+  layer, Merkle cargo proofs, the bracket.
+- **A fight you can follow.** An `EVENTS` frame after each tick says what happened (fire, hit, hull, dodge, shield, heal, repair, heat, burn), and the browser client animates
+  it: shots travel down lanes, damage lands on the part, the hull bar glides.
+- **Counterplay, measured.** The bot pool plays the human strategies as well as evolved ships, and the matrix of hand-drawn strategies against each other
+  (`dw2_loadout_search --archetypes`) has an answer for each: the laser line loses to an Aether wall and to cannons. Honest limits are in `docs/RULESET_2.md`.
+
 ## Deferred (not yet built)
 
 Everything `DEADWEIGHT/NORTHSTAR.md` already deferred still applies here: the options-pricing/
@@ -239,9 +266,7 @@ D3 "real client shell" line that lived here is now folded into D2 above, not def
 - [ ] **Real art + EOSUI Option C chrome** for `dw2_client`, once `EOSUI-NORTH` actually exists
   (`EMILY/docs/EOSUI_NORTHSTAR.md`) — the client today renders immediate-mode colored rectangles
   only, same honest limitation `apps/local`'s own debug shell already named.
-- [ ] **D4: a real placeholder bot** (heuristic first, matching `arena_bot_enabled`'s own "no
-  local-practice fallback in real matches" convention) so a 1v1 bot pool can exist at all — this
-  is when `deadweight_2.bot.play`/`DEADWEIGHT2-BOTS` actually get minted, not before.
+- [x] **D4: a bot pool** — done (`dw2_bot`, 2026-10-17): protocol-client bots with searched ships and timed round-break calls; the prod server runs `--no-auth` and IDUNA's web gateway records every match itself, so no bot agent identity was needed; bots appear on the ladder as `deadweight_bot` player rows.
 - [ ] **D5: PARENA mod integration** for combat-decision edge cases, matching every other
   PARENA-hosted game's "PARENA mod is the trigger, host C does the real work" idiom. Partially real
   now, not fully: the cannon-programming section above wires exactly ONE such decision hook

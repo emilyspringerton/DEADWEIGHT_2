@@ -1,23 +1,28 @@
 # DEADWEIGHT_2
 
-The backpack battler from **Dark Sector: Hold Battles** — pack polyomino-shaped cargo items into
-a 6x6 grid under a space budget, then fight with the grid you built. Item shape and orientation
-route energy from generators to your weapons and defenses; the "waste" left over from cutting an
-item down to fit becomes armor. Build a container, then fight with the container you built.
+The backpack battler from **Dark Sector: Hold Battles** — pack parts into a 6x6 grid under a
+**credit budget (1000) and a weight budget (40 tons)**, then fight with the grid you built. Every part has a
+cost, a weight and HP; wiring routes power from generators to your guns and repairers; and shots fly down
+**lanes** (columns) and hit *parts*, so where a part sits decides what it shelters, what shelters it and what
+breaks first. Build a container, then fight with the container you built. The rules are in
+`docs/RULESET_2.md`.
 
 This is a separate repo from the sibling `DEADWEIGHT` (which shipped a different, turn-based
 card-mode game first) — see `NORTHSTAR.md` for the full design provenance and why the two are
 split.
 
-## Status: Phase D1 + D2 — the core mechanic, a real multiplayer server, a real client, a round-break mini-game, and cannon programming are live
+## Status: ruleset 2 — budgets, lanes and per-part HP, a real multiplayer server, a browser client, a bot pool, a round-break mini-game, and cannon programming are live
 
 **What's real today:**
-- The full core mechanic: 6x6 grid, 7 items (Generator/Conductor/Splitter Node for wiring,
-  Railgun as the one weapon, Bulwark Plate as the one armor piece, Titanium Beam and Aether Ore
-  as splittable cargo), energy routing with real one-to-many (Splitter) and many-to-one-is-inert
-  rules, a Back-EMF meltdown that permanently burns out a closed wiring loop, and a live,
-  mid-fight Panic Cut that reroutes energy and grants bonus armor from newly exposed Dead
-  Squares.
+- **Ruleset 2** (2026-10-17, `docs/RULESET_2.md`): 24 parts, each with a cost, a weight and per-cell HP; a ship may carry
+  1000 credits and 40 tons and as many parts as fit the 36 cells. Power is routed by a real circuit (Generator, Conductor,
+  Splitter, Amplifier, Resistors, Capacitor, Battery, Transistor, Delayer; a closed loop burns out with Back-EMF; a Quantum
+  Core makes 40 W but burns its neighbours unless a Cryo-Vent cools them). Three weapon families fire down lanes — the Pulse
+  Laser hits the first part and needs a clear lane, the Railgun pierces, the Siege Cannon lands on the deepest part with
+  splash — against materials that resist them differently (Bulwark, Titanium, Aether Ore), with Xeno-Biomass, the Aegis
+  Emitter and the Mender repairing, and dodge chance rising as a ship gets lighter. Cutting is gone: SPLIT turns a Titanium
+  Beam into two Shards and an Aether Ore into four Chips, in place. The server streams an EVENTS frame after every tick so a
+  client can show every shot, hit, repair and meltdown instead of a hull number that jumps.
 - A playable local debug shell (`apps/local/`): pack a grid by hand, lock it in, and fight a
   fixed dummy loadout in real time.
 - **In the browser**: `wotan.okemily.com/d2/play.html` -- a WebAssembly client (PARENA) of this server and its bots, through IDUNA's WebSocket gateway: pack the ship, READY, the fight, the
@@ -31,7 +36,7 @@ split.
   to meet another human before a bot is dealt in, so two people searching at once get a live match.
 - **`dw2_server`** (D2): a real, server-authoritative TCP match server — queue, get paired
   1v1, pack your grid against a live opponent within a time limit, then fight it out over a
-  real-time tick loop the server alone drives (a live `PANIC_CUT` stays legal mid-fight). Optional
+  real-time tick loop the server alone drives (`PANIC_CUT` is retired: the server refuses it). Optional
   IDUNA guest-account auth + match-result reporting (`game='d2'`); runs `--no-auth` for
   local testing with no IDUNA instance needed.
 - **Round-break mini-game** (EMILY/BACKLOG.md SECTION 548): combat is now broken into 5-tick
@@ -63,7 +68,7 @@ split.
   fire on a safe, non-lethal lead. No sibling LO/PARENA checkout is needed to build or run D2 —
   the generated C is committed; `scripts/generate_cannon.sh` regenerates it if a `.llll` source
   changes. Full design in `docs/LO_CANNON_PROGRAMMING.md`.
-- A headless test suite (`tests/test_core_loop.c`, ASan+UBSan clean, 100 checks) that exercises
+- A headless test suite (`tests/test_core_loop.c`, ASan+UBSan clean, about 1.75 million exact checks) that exercises
   every rule above — including the round-break grading/payoff table, with zero networking needed
   — with exact, hand-derived numbers, not just "it didn't crash." `scripts/build.sh` also runs
   `dw2_server` and `dw2_client` through full real matches over the actual wire protocol (ASan+UBSan
@@ -85,12 +90,12 @@ split.
   GitHub Release (`dw2_server`/`dw2_client`/`dw2_local` + the CONSTRUCT) — see "CI / releases"
   below.
 
-**What's not built yet, honestly:** no real art or shop/HUD chrome for `dw2_client` (colored
-rectangles only, same as the debug shell; the round-break's own target/timer is console-printed
-only, no on-screen countdown), no real playtesting/balance pass on the round-break's timing
+**What's not built yet, honestly:** the native `dw2_client`/`dw2_local` stay debug shells (colored
+rectangles, the first seven / nine parts selectable; the browser client is the real UI); no real
+playtesting against skilled humans — the bot pool's ships and the balance matrix in `docs/RULESET_2.md`
+come from a search over the real core that ignores the round-break duel — and no balance pass on the round-break's timing
 windows or payoff numbers, no round-break during `apps/local`'s fixed dummy fight (bluffing needs
-a live, reactive opponent), no real bot (D4, so no bot decision logic for the round-break call or
-cannon programming either), no charge-banking payoff for a cannon program that holds fire (so the
+a live, reactive opponent), no charge-banking payoff for a cannon program that holds fire (so the
 example "hold on a safe lead" program isn't wired live — see `docs/LO_CANNON_PROGRAMMING.md`), no
 general "any combat decision can be a PARENA mod" framework (D5 — cannon programming is one real,
 narrow slice of that idiom, not the whole thing). GPG-signed IDUNA app-release publishing is wired
@@ -122,30 +127,28 @@ zero dependencies beyond libc).
 ## Controls (debug shell)
 
 ```
-1-7          select an item from the catalog
+1-9          select one of the first nine parts
 arrows/WASD  move the grid cursor
 R            rotate the selected item / the item under the cursor
 ENTER        place the selected item at the cursor (packing phase only)
-C            Panic Cut the item under the cursor (legal while packing OR mid-fight)
 F            lock the grid and start the fight
 ESC          quit
 ```
 
 ## Controls (`dw2_client`)
 
-Same packing controls as the debug shell (`1-7`/arrows-WASD/`R`/`ENTER`/`C`), plus `F` to send
-READY instead of locking a local fight. During combat, `PANIC_CUT` is by placement index instead
-of cursor (the wire protocol never reveals a live grid — see `NORTHSTAR.md`); when a round-break
+Same packing controls as the debug shell (`1-7`/arrows-WASD/`R`/`ENTER`), plus `F` to send
+READY instead of locking a local fight. `C` and the digits during combat are the retired Panic Cut (they only print a notice;
+place Titanium Shards / Ore Chips to split a part). When a round-break
 opens (every 5 ticks), the console prints the real-time skill-check target and `O`/`B` respond:
 
 ```
-0-9   Panic Cut the placement at that index (printed as a legend when combat starts)
 O     Overcharge call during a round-break (high ceiling, backfires on a missed timing check)
 B     Brace call during a round-break (safe, low ceiling -- a miss costs nothing)
 ESC   quit
 ```
 
-Feedback (placements, cuts, per-tick hull%) prints to the terminal — the SDL window itself is
+Feedback (placements, per-tick hull%) prints to the terminal — the SDL window itself is
 deliberately bare-minimum (colored rectangles only) at this phase.
 
 ## CI / releases
