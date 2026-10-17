@@ -30,8 +30,8 @@ jobs:
       - name: Auth to GCP (Workload Identity, no stored key)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER || 'projects/532442865445/locations/global/workloadIdentityPools/github/providers/github' }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT || 'github-ci@project-d24a71e9-2daf-4b2d-917.iam.gserviceaccount.com' }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
