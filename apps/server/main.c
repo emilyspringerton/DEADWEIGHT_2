@@ -42,7 +42,7 @@ typedef struct {
     uint8_t in[INBUF]; size_t in_n;
     uint8_t out[OUTBUF]; size_t out_n;
     char name[DW2_NAME_LEN + 1]; uint8_t kind; char player_id[48];
-    int match, seat; uint64_t queued_seq, connect_ms; int close_after_flush;
+    int match, seat; uint64_t queued_seq, connect_ms, queued_ms; int close_after_flush;
 } Conn;
 
 typedef struct {
@@ -65,6 +65,8 @@ static int opt_noauth = 1, opt_verbose = 0, opt_fast_forward = 0;
 static int opt_iduna = 0, opt_fail_open = 0, opt_noauth_explicit = 0;
 static Dw2Iduna iduna;
 static int opt_pack_ms = PACK_MS_DEFAULT, opt_tick_ms = TICK_MS_DEFAULT;
+/* A lone human waits this long for another human before a bot is dealt in (0 = a bot at once). */
+static int opt_human_wait_ms = 6000;
 static uint32_t next_session = 1, next_match = 1, seed_state = 0x9E3779B9u;
 static uint64_t queue_seq = 0;
 static long st_matches = 0, st_forfeits = 0;
@@ -363,7 +365,11 @@ static void try_pair(void) {
         int h1 = oldest_queued(DW2_KIND_HUMAN, -1, &nh);
         int b1 = oldest_queued(DW2_KIND_BOT, -1, &nb);
         if (nh >= 2) { int h2 = oldest_queued(DW2_KIND_HUMAN, h1, NULL); if (!start_match(h1, h2)) break; continue; }
-        if (nh == 1 && nb >= 1) { if (!start_match(h1, b1)) break; continue; }
+        if (nh == 1 && nb >= 1) {
+            if (opt_human_wait_ms > 0 && dw2_now_ms() - conns[h1].queued_ms < (uint64_t)opt_human_wait_ms) break;
+            if (!start_match(h1, b1)) break;
+            continue;
+        }
         if (nh == 0 && nb >= 3) { int b2 = oldest_queued(DW2_KIND_BOT, b1, NULL); if (!start_match(b1, b2)) break; continue; }
         break;
     }
@@ -444,7 +450,7 @@ static void drain_results(void) {
 
 static void enter_queue(int ci) {
     Conn *c = &conns[ci]; Dw2WireMsg r; memset(&r, 0, sizeof r);
-    c->state = S_QUEUED; c->queued_seq = ++queue_seq;
+    c->state = S_QUEUED; c->queued_seq = ++queue_seq; c->queued_ms = dw2_now_ms();
     r.type = DW2_S_QUEUED; r.u.queued.waiting = (uint16_t)queued_count(); send_msg(ci, &r);
     try_pair();
 }
@@ -563,6 +569,7 @@ static void accept_conns(dw2_sock ls) {
 
 static void expire_timers(void) {
     uint64_t now = dw2_now_ms();
+    try_pair(); /* a human whose wait for another human has run out is dealt a bot */
     for (int i = 0; i < MAX_CONNS; i++)
         if ((conns[i].state == S_CONNECTED || conns[i].state == S_NEEDAUTH || conns[i].state == S_VERIFYING) && now - conns[i].connect_ms > HELLO_TIMEOUT_MS) conn_close(i);
     for (int i = 0; i < MAX_MATCHES; i++) {
@@ -587,10 +594,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--agent-name") && i + 1 < argc) agent_name = argv[++i];
         else if (!strcmp(argv[i], "--auth-fail-open")) opt_fail_open = 1;
         else if (!strcmp(argv[i], "--pack-ms") && i + 1 < argc) { opt_pack_ms = atoi(argv[++i]); if (opt_pack_ms < 1000 || opt_pack_ms > 300000) { fprintf(stderr, "--pack-ms must be 1000..300000\n"); return 2; } }
+        else if (!strcmp(argv[i], "--human-wait-ms") && i + 1 < argc) { opt_human_wait_ms = atoi(argv[++i]); if (opt_human_wait_ms < 0 || opt_human_wait_ms > 60000) { fprintf(stderr, "--human-wait-ms must be 0..60000\n"); return 2; } }
         else if (!strcmp(argv[i], "--tick-ms") && i + 1 < argc) { opt_tick_ms = atoi(argv[++i]); if (opt_tick_ms < 10 || opt_tick_ms > 10000) { fprintf(stderr, "--tick-ms must be 10..10000\n"); return 2; } }
         else if (!strcmp(argv[i], "--verbose")) opt_verbose = 1;
         else {
-            fprintf(stderr, "usage: dw2_server [--port N] [--bind ADDR] [--fast-forward] [--no-auth] [--iduna-url URL --agent-secret-file F [--agent-name N] [--auth-fail-open]] [--pack-ms N] [--tick-ms N] [--verbose] [--version]\n");
+            fprintf(stderr, "usage: dw2_server [--port N] [--bind ADDR] [--fast-forward] [--no-auth] [--iduna-url URL --agent-secret-file F [--agent-name N] [--auth-fail-open]] [--pack-ms N] [--tick-ms N] [--human-wait-ms N] [--verbose] [--version]\n");
             return 2;
         }
     }

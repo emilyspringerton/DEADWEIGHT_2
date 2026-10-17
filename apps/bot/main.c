@@ -22,7 +22,7 @@
 #include "loadouts.h"
 
 #define MAX_BOTS 32
-enum { B_DOWN = 0, B_HELLO, B_QUEUED, B_PACK, B_COMBAT };
+enum { B_DOWN = 0, B_HELLO, B_QUEUED, B_PACK, B_COMBAT, B_OFF };
 
 typedef struct {
     dw2_sock fd; int state; uint8_t in[2048]; size_t in_n;
@@ -34,9 +34,13 @@ typedef struct {
 } Bot;
 
 static Bot bots[MAX_BOTS];
-static int n_bots = 6, opt_skill = 90, opt_verbose = 0, opt_port = 7800;
+/* The pool is elastic: it starts at --count bots and keeps --spare of them idle in the server's queue, so a person who arrives
+ * is dealt a bot at once. Bots are added when the idle ones are taken (up to --max) and idle ones are let go after a quiet
+ * spell (down to --min). With --max == --count it is a fixed pool. */
+static int n_bots = 6, opt_min = 0, opt_max = 0, opt_spare = 2, opt_skill = 90, opt_verbose = 0, opt_port = 7800;
 static const char *opt_host = "127.0.0.1";
 static volatile sig_atomic_t stop_flag = 0;
+static uint64_t last_human_ms = 0;   /* when a person last sat down against one of us: the demand signal */
 
 static void on_signal(int s) { (void)s; stop_flag = 1; }
 static uint32_t brnd(Bot *b) { b->rng ^= b->rng << 13; b->rng ^= b->rng >> 17; b->rng ^= b->rng << 5; return b->rng; }
@@ -107,6 +111,7 @@ static void on_msg(Bot *b, const Dw2WireMsg *m, uint64_t now) {
     case DW2_S_MATCH_FOUND:
         b->state = B_PACK; b->seat = m->u.match_found.seat; b->seed = m->u.match_found.seed; b->pack_ms = m->u.match_found.pack_ms;
         b->hull_you = b->hull_opp = 100;
+        if (m->u.match_found.opp_kind == DW2_KIND_HUMAN) last_human_ms = now;
         pack_ship(b);
         /* a bot looks at its ship for a moment, like a person; it never runs the pack clock down */
         b->ready_at = now + 1500 + (uint64_t)bi(b, 4000); b->ready_pending = 1;
@@ -173,10 +178,16 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--host") && i + 1 < argc) opt_host = argv[++i];
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) opt_port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--count") && i + 1 < argc) n_bots = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--min") && i + 1 < argc) opt_min = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max") && i + 1 < argc) opt_max = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--spare") && i + 1 < argc) opt_spare = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--skill") && i + 1 < argc) opt_skill = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--verbose")) opt_verbose = 1;
-        else { fprintf(stderr, "usage: dw2_bot [--host H] [--port N] [--count N] [--skill MS] [--verbose]\n"); return 2; }
+        else { fprintf(stderr, "usage: dw2_bot [--host H] [--port N] [--count N] [--min N] [--max N] [--spare N] [--skill MS] [--verbose]\n"); return 2; }
     }
+    if (opt_max == 0) opt_max = n_bots;
+    if (opt_min == 0) opt_min = n_bots < opt_max ? n_bots : opt_max;
+    if (opt_max > MAX_BOTS || opt_min < 1 || opt_min > opt_max || n_bots < opt_min || n_bots > opt_max || opt_spare < 0) { fprintf(stderr, "dw2_bot: need 1 <= --min <= --count <= --max <= %d\n", MAX_BOTS); return 2; }
     if (n_bots < 1 || n_bots > MAX_BOTS || opt_skill < 5 || opt_skill > 400) { fprintf(stderr, "dw2_bot: bad --count/--skill\n"); return 2; }
     if (dw2_net_init() != 0) return 1;
     signal(SIGINT, on_signal); signal(SIGTERM, on_signal);
@@ -184,23 +195,49 @@ int main(int argc, char **argv) {
                                          "Moth", "Nacre", "Orrery", "Pylon", "Quill", "Rivet", "Sable", "Tallow", "Umber", "Vesper", "Wick", "Xenon",
                                          "Yarrow", "Zenith", "Argent", "Basalt", "Cinder", "Drift", "Elm", "Fjord" };
     uint64_t t0 = dw2_now_ms();
-    for (int i = 0; i < n_bots; i++) {
+    for (int i = 0; i < opt_max; i++) {
         Bot *b = &bots[i]; memset(b, 0, sizeof *b);
-        b->fd = DW2_BAD_SOCK; b->state = B_DOWN;
+        b->fd = DW2_BAD_SOCK; b->state = B_OFF;
         snprintf(b->name, sizeof b->name, "%s Bot", names[i % 32]);
         b->rng = (0x9E3779B9u * (uint32_t)(i + 1) ^ (uint32_t)t0) | 1u;
         b->skill = opt_skill + (i % 3 - 1) * opt_skill / 3;     /* sharper and sloppier bots in one pool */
-        b->retry_at = t0 + (uint64_t)i * 250;                   /* connect staggered */
     }
-    fprintf(stderr, "dw2_bot: %d bots -> %s:%d (skill ~%d ms)\n", n_bots, opt_host, opt_port, opt_skill);
+    for (int i = 0; i < n_bots; i++) { bots[i].state = B_DOWN; bots[i].retry_at = t0 + (uint64_t)i * 250; }   /* connect staggered */
+    fprintf(stderr, "dw2_bot: %d bots (%d..%d, %d spare) -> %s:%d (skill ~%d ms)\n", n_bots, opt_min, opt_max, opt_spare, opt_host, opt_port, opt_skill);
+    uint64_t next_scale = t0 + 3000, calm_since = 0;
+    last_human_ms = t0;
     while (!stop_flag) {
         struct pollfd pf[MAX_BOTS]; int map[MAX_BOTS]; unsigned n = 0;
-        for (int i = 0; i < n_bots; i++) if (bots[i].fd != DW2_BAD_SOCK) { pf[n].fd = bots[i].fd; pf[n].events = POLLIN; pf[n].revents = 0; map[n++] = i; }
+        for (int i = 0; i < opt_max; i++) if (bots[i].fd != DW2_BAD_SOCK) { pf[n].fd = bots[i].fd; pf[n].events = POLLIN; pf[n].revents = 0; map[n++] = i; }
         if (n) dw2_poll(pf, n, 15); else dw2_sleep_ms(15);
         uint64_t now = dw2_now_ms();
         for (unsigned k = 0; k < n; k++) if (pf[k].revents & (POLLIN | POLLHUP | POLLERR)) read_bot(&bots[map[k]], now);
-        for (int i = 0; i < n_bots; i++) timers(&bots[i], now);
+        for (int i = 0; i < opt_max; i++) if (bots[i].state != B_OFF) timers(&bots[i], now);
+        if (now >= next_scale) {
+            next_scale = now + 500;
+            int live = 0, idle = 0;
+            for (int i = 0; i < opt_max; i++) {
+                if (bots[i].state == B_OFF) continue;
+                live++;
+                if (bots[i].state == B_QUEUED || bots[i].state == B_HELLO || bots[i].state == B_DOWN) idle++;   /* free, or about to be */
+            }
+            if (idle < opt_spare && live < opt_max && now - last_human_ms <= 60000) {
+                for (int i = 0; i < opt_max; i++) if (bots[i].state == B_OFF) {
+                    bots[i].state = B_DOWN; bots[i].retry_at = now; bots[i].matches = 0;
+                    fprintf(stderr, "dw2_bot: %d idle, adding %s (%d live)\n", idle, bots[i].name, live + 1);
+                    break;
+                }
+            } else if (idle >= 1 && live > opt_min && now - last_human_ms > 60000 && now - calm_since > 10000) {
+                /* nobody has played a bot for a minute: let one idle bot go every 10 s, down to --min */
+                for (int i = opt_max - 1; i >= 0; i--) if (bots[i].state == B_QUEUED && !bots[i].retry_at) {
+                    drop(&bots[i], now, 0); bots[i].state = B_OFF;
+                    fprintf(stderr, "dw2_bot: quiet, releasing %s (%d live)\n", bots[i].name, live - 1);
+                    break;
+                }
+                calm_since = now;
+            }
+        }
     }
-    for (int i = 0; i < n_bots; i++) if (bots[i].fd != DW2_BAD_SOCK) dw2_close(bots[i].fd);
+    for (int i = 0; i < opt_max; i++) if (bots[i].fd != DW2_BAD_SOCK) dw2_close(bots[i].fd);
     return 0;
 }

@@ -46,7 +46,7 @@ gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
     core/protocol.c core/round.c core/combat.c core/items.c tools/dw2_test_client.c $CANNON_SRC -o build/dw2_test_client
 
 DW2_TEST_PORT=17800
-./build/dw2_server --port "$DW2_TEST_PORT" --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
+./build/dw2_server --port "$DW2_TEST_PORT" --human-wait-ms 0 --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
     > build/dw2_server_smoketest.log 2>&1 &
 DW2_SRV_PID=$!
 trap 'kill "$DW2_SRV_PID" 2>/dev/null || true' EXIT
@@ -89,7 +89,7 @@ echo "== D2: round-break mini-game -- comeback smoke test (ASan+UBSan) =="
 #   round5 (ticks 21-25, neutral):           tick21 A deals 15 (B 15->0, DEAD), B deals 15 (A 30->15)
 # -> A wins at tick 21 (hull 15% vs 0%), where the untouched baseline would still be an even tie.
 DW2_TEST_PORT3=17802
-./build/dw2_server --port "$DW2_TEST_PORT3" --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
+./build/dw2_server --port "$DW2_TEST_PORT3" --human-wait-ms 0 --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
     > build/dw2_server_round_smoketest.log 2>&1 &
 DW2_SRV3_PID=$!
 trap 'kill "$DW2_SRV3_PID" 2>/dev/null || true' EXIT
@@ -116,7 +116,7 @@ gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all $(pkg
     $(pkg-config --libs sdl2) -o build/dw2_client
 
 DW2_TEST_PORT2=17801
-./build/dw2_server --port "$DW2_TEST_PORT2" --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
+./build/dw2_server --port "$DW2_TEST_PORT2" --human-wait-ms 0 --no-auth --fast-forward --pack-ms 3000 --tick-ms 20 --verbose \
     > build/dw2_server_d3_smoketest.log 2>&1 &
 DW2_SRV2_PID=$!
 trap 'kill "$DW2_SRV2_PID" 2>/dev/null || true' EXIT
@@ -151,7 +151,7 @@ gcc $CFLAGS_BASE -g -fsanitize=address,undefined -fno-sanitize-recover=all \
     tests/test_bot_loadouts.c core/items.c core/combat.c core/round.c $CANNON_SRC -o build/test_bot_loadouts
 ./build/test_bot_loadouts
 DW2_TEST_PORT4=17803
-./build/dw2_server --port "$DW2_TEST_PORT4" --no-auth --fast-forward --pack-ms 6000 --tick-ms 20 --verbose \
+./build/dw2_server --port "$DW2_TEST_PORT4" --human-wait-ms 0 --no-auth --fast-forward --pack-ms 6000 --tick-ms 20 --verbose \
     > build/dw2_server_bot_smoketest.log 2>&1 &
 DW2_SRV4_PID=$!
 trap 'kill "$DW2_SRV4_PID" "${DW2_BOT_PID:-}" 2>/dev/null || true' EXIT
