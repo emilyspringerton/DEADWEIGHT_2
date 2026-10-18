@@ -1,7 +1,7 @@
 # DEADWEIGHT_2
 
 The backpack battler from **Dark Sector: Hold Battles** — pack parts into a 6x6 grid under a
-**credit budget (1000) and a weight budget (40 tons)**, then fight with the grid you built. Every part has a
+**credit budget (2618) and a weight budget (105 tons)**, then fight with the grid you built. Every part has a
 cost, a weight and HP; wiring routes power from generators to your guns and repairers; and shots fly down
 **lanes** (columns) and hit *parts*, so where a part sits decides what it shelters, what shelters it and what
 breaks first. Build a container, then fight with the container you built. The rules are in
@@ -15,7 +15,7 @@ split.
 
 **What's real today:**
 - **Ruleset 2** (2026-10-17, `docs/RULESET_2.md`): 24 parts, each with a cost, a weight and per-cell HP; a ship may carry
-  1000 credits and 40 tons and as many parts as fit the 36 cells. Power is routed by a real circuit (Generator, Conductor,
+  2618 credits and 105 tons and as many parts as fit the 36 cells. Power is routed by a real circuit (Generator, Conductor,
   Splitter, Amplifier, Resistors, Capacitor, Battery, Transistor, Delayer; a closed loop burns out with Back-EMF; a Quantum
   Core makes 40 W but burns its neighbours unless a Cryo-Vent cools them). Three weapon families fire down lanes — the Pulse
   Laser hits the first part and needs a clear lane, the Railgun pierces, the Siege Cannon lands on the deepest part with

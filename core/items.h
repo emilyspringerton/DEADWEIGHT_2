@@ -16,8 +16,9 @@
 
 #define DW2_ITEM_COUNT 24
 
-#define DW2_BUDGET_CREDITS 1000
-#define DW2_BUDGET_WEIGHT    40
+#define DW2_BUDGET_CREDITS 2618   /* 1000 x phi x phi */
+#define DW2_EVADE_REF_WEIGHT 40    /* dodge is still measured from the original 40 t, so the bigger budget does not make every ship slippery */
+#define DW2_BUDGET_WEIGHT  105   /* 40 t x phi x phi = 104.7, rounded */
 
 /* Stable indices into dw2_catalog[]. 0-18 are older ids and keep their numbers; the rest are appended. */
 enum {

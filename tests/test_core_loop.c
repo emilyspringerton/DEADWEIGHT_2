@@ -58,18 +58,18 @@ static void test_rotation_math(void) {
 }
 
 static void test_budget(void) {
-    /* credits: Railguns cost 240, so four fit under 1000 and the fifth does not */
+    /* credits: Railguns cost 240, so ten fit under 2618 and the eleventh does not */
     Dw2Ship s; dw2_ship_init(&s);
     int placed = 0;
-    for (int i = 0; i < 6; i++) if (dw2_ship_place(&s, DW2_ITEM_RAILGUN, 0, i, 0) >= 0) placed++;
-    CHECK(placed == 4);
-    CHECK(s.cost == 4 * dw2_catalog[DW2_ITEM_RAILGUN].cost && s.cost <= DW2_BUDGET_CREDITS);
+    for (int i = 0; i < 12; i++) if (dw2_ship_place(&s, DW2_ITEM_RAILGUN, i / 6, i % 6, 0) >= 0) placed++;
+    CHECK(placed == 10);
+    CHECK(s.cost == 10 * dw2_catalog[DW2_ITEM_RAILGUN].cost && s.cost <= DW2_BUDGET_CREDITS);
     CHECK(s.weight <= DW2_BUDGET_WEIGHT);
     /* a failed placement changes nothing */
     int cost = s.cost, weight = s.weight, n = s.placement_n; dw2_mask occ = s.grid.occupied;
     CHECK(dw2_ship_place(&s, DW2_ITEM_RAILGUN, 1, 0, 0) == -1);
     CHECK(s.cost == cost && s.weight == weight && s.placement_n == n && s.grid.occupied == occ);
-    /* weight: Bulwark Plates are cheap (55) but weigh 5, so the 40 t budget stops the ninth */
+    /* weight: Bulwark Plates are cheap (55) but weigh 5, so the 105 t budget stops the 22nd */
     Dw2Ship w; dw2_ship_init(&w);
     int plates = 0;
     for (int r = 0; r < 6; r++) for (int c = 0; c < 6; c++) if (dw2_ship_place(&w, DW2_ITEM_BULWARK, r, c, 0) >= 0) plates++;
@@ -315,7 +315,7 @@ static void test_shield_soaks_first(void) {
 }
 
 static void test_light_ships_dodge_slugs_but_not_beams(void) {
-    /* weight 4 of 40: dodge chance (40-4) x 1.5 = capped at 50% -> every second slug misses */
+    /* weight 4 (dodge reference 40 t): dodge chance (40-4) x 1.5 = capped at 50% -> every second slug misses */
     Dw2Ship foe; foe_ship(&foe); dw2_ship_place(&foe, DW2_ITEM_CONDUCTOR, 5, 5, 0); dw2_ship_start_combat(&foe);
     CHECK(foe.evade_pct == DW2_EVADE_MAX);
     Dw2Ship me; dw2_ship_init(&me); armed(&me, 0, DW2_ITEM_RAILGUN); dw2_ship_start_combat(&me);

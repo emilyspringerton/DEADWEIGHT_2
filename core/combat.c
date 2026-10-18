@@ -83,7 +83,7 @@ void dw2_ship_start_combat(Dw2Ship *s) {
         }
         s->weapon_charge[p] = 0; s->shots[p] = 0; s->shot_dmg[p] = 0;
     }
-    s->evade_pct = (float)(DW2_BUDGET_WEIGHT - s->weight) * DW2_EVADE_PER_TON;
+    s->evade_pct = (float)(DW2_EVADE_REF_WEIGHT - s->weight) * DW2_EVADE_PER_TON;
     if (s->evade_pct < 0.0f) s->evade_pct = 0.0f;
     if (s->evade_pct > DW2_EVADE_MAX) s->evade_pct = DW2_EVADE_MAX;
     s->evade_acc = 0.0f;

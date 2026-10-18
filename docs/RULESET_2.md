@@ -8,7 +8,7 @@ Everything below is in `core/` (`items.[ch]`, `combat.[ch]`, `protocol.[ch]`), i
 
 | Before (ruleset 1) | Now | Why |
 |---|---|---|
-| at most 16 parts | **no limit on parts** except the 36 cells; every part has a **cost** and a **weight**; a ship may carry **1000 credits** and **40 tons** | the limit was a rule the player could not see a reason for; a budget is one they can feel, and it is what makes position the only free variable |
+| at most 16 parts | **no limit on parts** except the 36 cells; every part has a **cost** and a **weight**; a ship may carry **2618 credits** and **105 tons** | the limit was a rule the player could not see a reason for; a budget is one they can feel, and it is what makes position the only free variable |
 | one scalar of armour; damage was a number that dropped | **every cell has HP**; shots hit a *part*; a part at 0 HP is destroyed (it no longer conducts power, fires, heals or blocks) | "I go from full health to dead and I don't know why": now the player can watch which part broke and what it took with it |
 | enemy fire hit the ship in general | shots fly down **lanes**: the enemy's column of the same number, from the bow (row 0) to the stern | where a part sits decides what shields it, what it shields and what hits it first |
 | Panic Cut (fold a part over a second copy) | **SPLIT in place**: a Titanium Beam becomes two Titanium Shards, an Aether Ore four Ore Chips, on exactly the cells it held | the cut was unreadable; a split is two ordinary parts you can see and place |
